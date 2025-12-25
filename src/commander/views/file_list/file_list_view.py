@@ -1,9 +1,13 @@
 """File list view - center panel."""
 
+from __future__ import annotations
+
 import sys
 import subprocess
+import zipfile
 from pathlib import Path
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import (
     Qt,
@@ -11,197 +15,38 @@ from PySide6.QtCore import (
     QDir,
     QModelIndex,
     QSize,
-    QMimeData,
-    QUrl,
     QPoint,
-    QRect,
     QTimer,
-    QSortFilterProxyModel,
 )
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
-    QHBoxLayout,
     QListView,
-    QTreeView,
     QFileSystemModel,
     QAbstractItemView,
     QMenu,
     QInputDialog,
     QMessageBox,
-    QStyledItemDelegate,
-    QStyle,
     QApplication,
     QStackedWidget,
     QHeaderView,
-    QLineEdit,
     QLabel,
 )
-from PySide6.QtGui import (
-    QDrag,
-    QAction,
-    QCursor,
-    QPainter,
-    QPixmap,
-    QIcon,
-    QDragEnterEvent,
-    QDropEvent,
-)
 
-from commander.core.thumbnail_provider import get_thumbnail_provider
+from commander.views.file_list.drop_views import DropEnabledTreeView, DropEnabledListView
+from commander.views.file_list.thumbnail_delegate import ThumbnailDelegate
 from commander.utils.settings import Settings
 
-
-class DropEnabledTreeView(QTreeView):
-    """TreeView that handles external file drops."""
-
-    files_dropped = Signal(list, Path)  # dropped files, destination
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-        self._current_path: Path | None = None
-
-    def set_current_path(self, path: Path):
-        """Set current directory path for drops."""
-        self._current_path = path
-
-    def dragEnterEvent(self, event: QDragEnterEvent):
-        """Handle drag enter - accept file drops from external apps."""
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragEnterEvent(event)
-
-    def dragMoveEvent(self, event):
-        """Handle drag move."""
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragMoveEvent(event)
-
-    def dropEvent(self, event: QDropEvent):
-        """Handle drop - copy/move files from external apps."""
-        if event.mimeData().hasUrls() and self._current_path:
-            urls = event.mimeData().urls()
-            paths = [Path(url.toLocalFile()) for url in urls if url.isLocalFile()]
-            if paths:
-                self.files_dropped.emit(paths, self._current_path)
-                event.acceptProposedAction()
-                return
-        super().dropEvent(event)
-
-
-class DropEnabledListView(QListView):
-    """ListView that handles external file drops."""
-
-    files_dropped = Signal(list, Path)  # dropped files, destination
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-        self._current_path: Path | None = None
-
-    def set_current_path(self, path: Path):
-        """Set current directory path for drops."""
-        self._current_path = path
-
-    def dragEnterEvent(self, event: QDragEnterEvent):
-        """Handle drag enter - accept file drops from external apps."""
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragEnterEvent(event)
-
-    def dragMoveEvent(self, event):
-        """Handle drag move."""
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragMoveEvent(event)
-
-    def dropEvent(self, event: QDropEvent):
-        """Handle drop - copy/move files from external apps."""
-        if event.mimeData().hasUrls() and self._current_path:
-            urls = event.mimeData().urls()
-            paths = [Path(url.toLocalFile()) for url in urls if url.isLocalFile()]
-            if paths:
-                self.files_dropped.emit(paths, self._current_path)
-                event.acceptProposedAction()
-                return
-        super().dropEvent(event)
+if TYPE_CHECKING:
+    from PySide6.QtGui import QDragEnterEvent, QDropEvent
 
 
 class ViewMode(Enum):
+    """View modes for the file list."""
+
     LIST = "list"
     ICONS = "icons"
     THUMBNAILS = "thumbnails"
-
-
-class ThumbnailDelegate(QStyledItemDelegate):
-    """Custom delegate for displaying image thumbnails."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._thumbnail_provider = get_thumbnail_provider()
-        self._thumbnail_provider.thumbnail_ready.connect(self._on_thumbnail_ready)
-        self._view = parent
-
-    def _on_thumbnail_ready(self, path_str: str):
-        """Handle thumbnail ready - trigger repaint."""
-        if self._view:
-            self._view.viewport().update()
-
-    def paint(self, painter: QPainter, option, index: QModelIndex):
-        """Paint the item with thumbnail if available."""
-        # Get file path from model
-        model = index.model()
-        file_path = Path(model.filePath(index))
-
-        # Check if it's an image and we have a thumbnail
-        thumbnail = None
-        if file_path.is_file() and self._thumbnail_provider.is_supported(file_path):
-            thumbnail = self._thumbnail_provider.get_thumbnail(file_path)
-
-        if thumbnail:
-            # Draw selection background
-            if option.state & QStyle.StateFlag.State_Selected:
-                painter.fillRect(option.rect, option.palette.highlight())
-
-            # Calculate centered position for thumbnail
-            thumb_rect = QRect(
-                option.rect.x() + (option.rect.width() - thumbnail.width()) // 2,
-                option.rect.y() + 5,
-                thumbnail.width(),
-                thumbnail.height(),
-            )
-            painter.drawPixmap(thumb_rect, thumbnail)
-
-            # Draw filename below thumbnail
-            text_rect = QRect(
-                option.rect.x(),
-                option.rect.y() + option.rect.height() - 35,
-                option.rect.width(),
-                30,
-            )
-
-            text_color = (
-                option.palette.highlightedText().color()
-                if option.state & QStyle.StateFlag.State_Selected
-                else option.palette.text().color()
-            )
-            painter.setPen(text_color)
-
-            file_name = model.fileName(index)
-            elided = painter.fontMetrics().elidedText(
-                file_name, Qt.TextElideMode.ElideMiddle, text_rect.width() - 4
-            )
-            painter.drawText(
-                text_rect, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, elided
-            )
-        else:
-            # Default painting for non-images
-            super().paint(painter, option, index)
 
 
 class FileListView(QWidget):
@@ -212,7 +57,7 @@ class FileListView(QWidget):
     request_compress = Signal(list)
     request_terminal = Signal(Path)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
 
         self._model = QFileSystemModel()
@@ -236,7 +81,7 @@ class FileListView(QWidget):
 
         self._setup_ui()
 
-    def _setup_ui(self):
+    def _setup_ui(self) -> None:
         """Setup the stacked widget with different views."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -321,14 +166,17 @@ class FileListView(QWidget):
 
     def _current_view(self) -> QAbstractItemView:
         """Get the current active view."""
-        return self._stack.currentWidget()
+        widget = self._stack.currentWidget()
+        # Both DropEnabledTreeView and DropEnabledListView are QAbstractItemView subclasses
+        assert isinstance(widget, QAbstractItemView)
+        return widget
 
-    def focusInEvent(self, event):
+    def focusInEvent(self, event) -> None:
         """Forward focus to the current view."""
         super().focusInEvent(event)
         self._current_view().setFocus()
 
-    def set_root_path(self, path: Path):
+    def set_root_path(self, path: Path) -> None:
         """Set the directory to display."""
         self._current_path = path
         self._model.setRootPath(str(path))
@@ -344,7 +192,7 @@ class FileListView(QWidget):
         # Reconnect selection changed signals
         self._connect_selection_signals()
 
-    def _connect_selection_signals(self):
+    def _connect_selection_signals(self) -> None:
         """Connect selection changed signals for both views."""
         # Tree view - disconnect then reconnect
         tree_selection_model = self._tree_view.selectionModel()
@@ -362,7 +210,7 @@ class FileListView(QWidget):
             pass
         list_selection_model.selectionChanged.connect(self._on_selection_changed)
 
-    def set_view_mode(self, mode: str):
+    def set_view_mode(self, mode: str) -> None:
         """Change view mode (list, icons, thumbnails)."""
         self._view_mode = ViewMode(mode)
 
@@ -389,12 +237,12 @@ class FileListView(QWidget):
             self._list_view.setWordWrap(True)
             self._list_view.setItemDelegate(self._thumbnail_delegate)
 
-    def _on_clicked(self, index: QModelIndex):
+    def _on_clicked(self, index: QModelIndex) -> None:
         """Handle single click - select and preview."""
         path = Path(self._model.filePath(index))
         self.item_selected.emit(path)
 
-    def _on_selection_changed(self, selected, deselected):
+    def _on_selection_changed(self, selected, deselected) -> None:
         """Handle selection change (keyboard navigation)."""
         view = self._current_view()
         indexes = view.selectionModel().selectedIndexes()
@@ -406,14 +254,14 @@ class FileListView(QWidget):
                     self.item_selected.emit(path)
                     break
 
-    def _on_double_clicked(self, index: QModelIndex):
+    def _on_double_clicked(self, index: QModelIndex) -> None:
         """Handle double click - activate (open/navigate)."""
         path = Path(self._model.filePath(index))
         self.item_activated.emit(path)
 
     def get_selected_paths(self) -> list[Path]:
         """Get list of selected file paths."""
-        paths = []
+        paths: list[Path] = []
         view = self._current_view()
         for index in view.selectionModel().selectedIndexes():
             if index.column() == 0:  # Only count name column
@@ -422,7 +270,7 @@ class FileListView(QWidget):
                     paths.append(path)
         return paths
 
-    def start_rename(self):
+    def start_rename(self) -> None:
         """Start renaming selected item."""
         view = self._current_view()
         indexes = view.selectionModel().selectedIndexes()
@@ -439,7 +287,9 @@ class FileListView(QWidget):
         """Get selected indexes of current view (for compatibility)."""
         return self._current_view().selectionModel().selectedIndexes()
 
-    def _show_context_menu(self, pos: QPoint):
+    # === Context Menu ===
+
+    def _show_context_menu(self, pos: QPoint) -> None:
         """Show context menu with custom options."""
         selected_paths = self.get_selected_paths()
 
@@ -529,16 +379,17 @@ class FileListView(QWidget):
             reveal_action = menu.addAction("Open in Explorer")
         else:
             reveal_action = menu.addAction("Open in File Manager")
-        reveal_action.triggered.connect(
-            lambda: self._reveal_in_finder(
-                selected_paths[0] if selected_paths else self._current_path
-            )
-        )
+
+        reveal_path = selected_paths[0] if selected_paths else self._current_path
+        if reveal_path:
+            reveal_action.triggered.connect(lambda: self._reveal_in_finder(reveal_path))
 
         view = self._current_view()
         menu.exec(view.mapToGlobal(pos))
 
-    def _open_with_default(self, path: Path):
+    # === File Operations ===
+
+    def _open_with_default(self, path: Path) -> None:
         """Open file with default application."""
         if sys.platform == "darwin":
             subprocess.run(["open", str(path)])
@@ -549,24 +400,27 @@ class FileListView(QWidget):
         else:
             subprocess.run(["xdg-open", str(path)])
 
-    def _copy_files(self, paths: list[Path]):
+    def _copy_files(self, paths: list[Path]) -> None:
         """Copy files to clipboard."""
         from commander.core.file_operations import FileOperations
 
         ops = FileOperations()
         ops.copy_to_clipboard(paths)
 
-    def _cut_files(self, paths: list[Path]):
+    def _cut_files(self, paths: list[Path]) -> None:
         """Cut files to clipboard."""
         from commander.core.file_operations import FileOperations
 
         ops = FileOperations()
         ops.cut_to_clipboard(paths)
 
-    def _paste_files(self):
+    def _paste_files(self) -> None:
         """Paste files from clipboard."""
         from commander.core.file_operations import FileOperations
         from commander.widgets.progress_dialog import ProgressDialog
+
+        if self._current_path is None:
+            return
 
         ops = FileOperations()
         if not ops.has_clipboard():
@@ -577,9 +431,12 @@ class FileListView(QWidget):
         dialog.exec()
         self.set_root_path(self._current_path)
 
-    def _delete_files(self, paths: list[Path]):
+    def _delete_files(self, paths: list[Path]) -> None:
         """Delete files."""
         from commander.core.file_operations import FileOperations
+
+        if self._current_path is None:
+            return
 
         reply = QMessageBox.question(
             self,
@@ -592,8 +449,11 @@ class FileListView(QWidget):
             ops.delete(paths)
             self.set_root_path(self._current_path)
 
-    def _create_new_folder(self):
+    def _create_new_folder(self) -> None:
         """Create new folder."""
+        if self._current_path is None:
+            return
+
         name, ok = QInputDialog.getText(self, "New Folder", "Folder name:")
         if ok and name:
             new_path = self._current_path / name
@@ -603,9 +463,24 @@ class FileListView(QWidget):
             except OSError as e:
                 QMessageBox.warning(self, "Error", f"Cannot create folder: {e}")
 
-    def _compress_files(self, paths: list[Path]):
+    def _create_new_file(self) -> None:
+        """Create a new empty file."""
+        if self._current_path is None:
+            return
+
+        name, ok = QInputDialog.getText(self, "New File", "File name:")
+        if ok and name:
+            new_path = self._current_path / name
+            try:
+                new_path.touch()
+                self.set_root_path(self._current_path)
+            except OSError as e:
+                QMessageBox.warning(self, "Error", f"Cannot create file: {e}")
+
+    def _compress_files(self, paths: list[Path]) -> None:
         """Compress selected files to ZIP."""
-        import zipfile
+        if self._current_path is None:
+            return
 
         # Ask for zip file name
         default_name = paths[0].stem if len(paths) == 1 else "archive"
@@ -642,9 +517,12 @@ class FileListView(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Compression failed: {e}")
 
-    def _open_terminal(self):
+    def _open_terminal(self) -> None:
         """Open terminal at current path."""
         path = self._current_path
+        if path is None:
+            return
+
         if sys.platform == "darwin":
             script = f'tell app "Terminal" to do script "cd {path}"'
             subprocess.run(["osascript", "-e", script])
@@ -661,7 +539,7 @@ class FileListView(QWidget):
                 except FileNotFoundError:
                     continue
 
-    def _reveal_in_finder(self, path: Path):
+    def _reveal_in_finder(self, path: Path) -> None:
         """Reveal file/folder in Finder/Explorer."""
         if sys.platform == "darwin":
             subprocess.run(["open", "-R", str(path)])
@@ -670,7 +548,7 @@ class FileListView(QWidget):
         else:
             subprocess.run(["xdg-open", str(path.parent)])
 
-    def _copy_path(self, paths: list[Path]):
+    def _copy_path(self, paths: list[Path]) -> None:
         """Copy file paths to clipboard."""
         clipboard = QApplication.clipboard()
         if len(paths) == 1:
@@ -678,21 +556,21 @@ class FileListView(QWidget):
         else:
             clipboard.setText("\n".join(str(p) for p in paths))
 
-    def _show_info(self, path: Path):
+    def _show_info(self, path: Path) -> None:
         """Show file/folder info dialog."""
         from commander.widgets.info_dialog import InfoDialog
 
         dialog = InfoDialog(path, self)
         dialog.exec()
 
-    def _quick_look(self, path: Path):
+    def _quick_look(self, path: Path) -> None:
         """Open Quick Look preview (macOS only)."""
         if sys.platform == "darwin":
             subprocess.run(
                 ["qlmanage", "-p", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
 
-    def _populate_open_with_menu(self, menu: QMenu, path: Path):
+    def _populate_open_with_menu(self, menu: QMenu, path: Path) -> None:
         """Populate Open With submenu with available apps."""
         if sys.platform == "darwin":
             try:
@@ -720,28 +598,19 @@ class FileListView(QWidget):
             other_action = menu.addAction("Choose Application...")
             other_action.triggered.connect(lambda: self._open_with_other(path))
 
-    def _open_with_other(self, path: Path):
+    def _open_with_other(self, path: Path) -> None:
         """Open file with user-selected application."""
         if sys.platform == "darwin":
             subprocess.run(["open", "-a", "Finder", str(path)])
         elif sys.platform == "win32":
             subprocess.run(["rundll32", "shell32.dll,OpenAs_RunDLL", str(path)])
 
-    def _create_new_file(self):
-        """Create a new empty file."""
-        name, ok = QInputDialog.getText(self, "New File", "File name:")
-        if ok and name:
-            new_path = self._current_path / name
-            try:
-                new_path.touch()
-                self.set_root_path(self._current_path)
-            except OSError as e:
-                QMessageBox.warning(self, "Error", f"Cannot create file: {e}")
-
-    def _on_files_dropped(self, paths: list[Path], destination: Path):
+    def _on_files_dropped(self, paths: list[Path], destination: Path) -> None:
         """Handle files dropped from external app (e.g., Finder)."""
-        from commander.core.file_operations import FileOperations
         from commander.widgets.progress_dialog import ProgressDialog
+
+        if self._current_path is None:
+            return
 
         # Filter out files that are already in the destination
         paths_to_copy = [p for p in paths if p.parent != destination]
@@ -762,7 +631,6 @@ class FileListView(QWidget):
         if reply == QMessageBox.StandardButton.Cancel:
             return
 
-        ops = FileOperations()
         if reply == QMessageBox.StandardButton.Yes:
             # Copy
             dialog = ProgressDialog("copy", paths_to_copy, destination, self)
@@ -774,7 +642,9 @@ class FileListView(QWidget):
 
         self.set_root_path(self._current_path)
 
-    def eventFilter(self, obj, event):
+    # === Fuzzy Search ===
+
+    def eventFilter(self, obj, event) -> bool:
         """Filter key events from child views for fuzzy search."""
         if event.type() == event.Type.KeyPress:
             key = event.key()
@@ -808,13 +678,13 @@ class FileListView(QWidget):
 
         return super().eventFilter(obj, event)
 
-    def _do_fuzzy_search(self):
+    def _do_fuzzy_search(self) -> None:
         """Perform fuzzy search and select matching file."""
         if not self._search_text or not self._current_path:
             return
 
         # Show search overlay
-        self._search_label.setText(f"🔍 {self._search_text}")
+        self._search_label.setText(f"Search: {self._search_text}")
         self._search_label.adjustSize()
         self._search_label.move(10, self.height() - self._search_label.height() - 10)
         self._search_label.show()
@@ -824,7 +694,7 @@ class FileListView(QWidget):
         model = self._model
         root_index = view.rootIndex()
 
-        best_match = None
+        best_match: QModelIndex | None = None
         best_score = -1
 
         for row in range(model.rowCount(root_index)):
@@ -838,7 +708,7 @@ class FileListView(QWidget):
                 best_match = index
 
         # Select best match
-        if best_match and best_score > 0:
+        if best_match is not None and best_score > 0:
             view.setCurrentIndex(best_match)
             view.scrollTo(best_match)
             self._on_clicked(best_match)
@@ -875,7 +745,7 @@ class FileListView(QWidget):
 
         return score
 
-    def _clear_search(self):
+    def _clear_search(self) -> None:
         """Clear fuzzy search."""
         self._search_text = ""
         self._search_label.hide()
