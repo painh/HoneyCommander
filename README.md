@@ -62,6 +62,10 @@ uv run commander
 
 <!-- TODO: 스크린샷 추가 -->
 
+## 릴리즈
+
+[GitHub Releases](https://github.com/painh/HoneyCommander/releases)에서 빌드된 앱을 다운로드할 수 있습니다.
+
 ## 라이선스
 
 MIT License - 자유롭게 사용하세요!
