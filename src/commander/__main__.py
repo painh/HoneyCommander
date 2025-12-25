@@ -29,19 +29,8 @@ from commander.views.main_window import MainWindow
 from commander.utils.i18n import tr
 
 
-# Supported image formats
-IMAGE_EXTENSIONS = {
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".gif",
-    ".bmp",
-    ".webp",
-    ".tiff",
-    ".ico",
-    ".psd",
-    ".psb",
-}
+# Supported image formats - import from image_loader for consistency
+from commander.core.image_loader import ALL_IMAGE_FORMATS as IMAGE_EXTENSIONS
 
 
 class CommanderApp(QApplication):

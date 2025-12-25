@@ -22,12 +22,13 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QPixmap, QIcon
 
 from commander.core.archive_handler import ArchiveManager, ArchiveHandler, ArchiveEntry
+from commander.core.image_loader import ALL_IMAGE_FORMATS
 
 
 class ArchiveBrowser(QDialog):
     """Browser for archive contents."""
 
-    IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
+    IMAGE_EXTENSIONS = ALL_IMAGE_FORMATS
 
     def __init__(self, archive_path: Path, parent=None):
         super().__init__(parent)
@@ -119,13 +120,9 @@ class ArchiveBrowser(QDialog):
 
             # Set icon based on type
             if entry.is_dir:
-                item.setIcon(self.style().standardIcon(
-                    self.style().StandardPixmap.SP_DirIcon
-                ))
+                item.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DirIcon))
             else:
-                item.setIcon(self.style().standardIcon(
-                    self.style().StandardPixmap.SP_FileIcon
-                ))
+                item.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_FileIcon))
 
             self._file_list.addItem(item)
 
@@ -198,9 +195,7 @@ class ArchiveBrowser(QDialog):
                     if not entry.is_dir:
                         self._handler.extract(entry.path, Path(dest))
 
-                QMessageBox.information(
-                    self, "Success", f"Extracted to {dest}"
-                )
+                QMessageBox.information(self, "Success", f"Extracted to {dest}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Extract failed: {e}")
 
