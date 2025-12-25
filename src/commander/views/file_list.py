@@ -242,8 +242,15 @@ class FileListView(QListView):
     def _paste_files(self):
         """Paste files from clipboard."""
         from commander.core.file_operations import FileOperations
+        from commander.widgets.progress_dialog import ProgressDialog
+
         ops = FileOperations()
-        ops.paste(self._current_path)
+        if not ops.has_clipboard():
+            return
+
+        # Use progress dialog for paste operation
+        dialog = ProgressDialog("paste", [], self._current_path, self)
+        dialog.exec()
         self.set_root_path(self._current_path)
 
     def _delete_files(self, paths: list[Path]):

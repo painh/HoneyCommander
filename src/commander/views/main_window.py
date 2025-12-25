@@ -426,10 +426,23 @@ class MainWindow(QMainWindow):
 
     def _paste(self):
         """Paste items from clipboard."""
-        count = self._file_ops.paste(self._current_path)
-        if count > 0:
+        from commander.widgets.progress_dialog import ProgressDialog
+
+        if not self._file_ops.has_clipboard():
+            self._status_bar.showMessage("Nothing to paste")
+            return
+
+        # Use progress dialog for paste operation
+        dialog = ProgressDialog("paste", [], self._current_path, self)
+        result = dialog.exec()
+
+        if result:
+            count = dialog.get_result()
             self._refresh()
-            self._status_bar.showMessage(f"Pasted {count} item(s)")
+            if count > 0:
+                self._status_bar.showMessage(f"Pasted {count} item(s)")
+            else:
+                self._status_bar.showMessage("Paste cancelled")
 
     def _delete_selected(self):
         """Delete selected items."""
