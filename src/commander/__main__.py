@@ -70,7 +70,7 @@ class CommanderApp(QApplication):
 
     def _open_image_viewer(self, image_path: Path):
         """Open the fullscreen image viewer."""
-        from commander.views.fullscreen_viewer import FullscreenImageViewer
+        from commander.views.viewer import FullscreenImageViewer
 
         # Close main window if open
         if self._main_window:

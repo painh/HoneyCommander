@@ -22,6 +22,7 @@ commander-gui = "commander.__main__:main"
 dev = [
     "pytest>=7.4.0",
     "ruff>=0.1.0",
+    "pyright>=1.1.0",
 ]
 build = [
     "pyinstaller>=6.0.0",
