@@ -132,11 +132,20 @@ class FileListView(QListView):
             open_action = menu.addAction("Open")
             open_action.triggered.connect(lambda: self._open_with_default(selected_paths[0]))
 
+            # Open With submenu (macOS only for now)
+            if sys.platform == "darwin" and len(selected_paths) == 1:
+                open_with_menu = menu.addMenu("Open With")
+                self._populate_open_with_menu(open_with_menu, selected_paths[0])
+
             if len(selected_paths) == 1:
                 # Rename (F2)
                 rename_action = menu.addAction("Rename")
                 rename_action.setShortcut("F2")
                 rename_action.triggered.connect(self.start_rename)
+
+                # Get Info
+                info_action = menu.addAction("Get Info")
+                info_action.triggered.connect(lambda: self._show_info(selected_paths[0]))
 
             menu.addSeparator()
 
@@ -147,6 +156,10 @@ class FileListView(QListView):
             cut_action = menu.addAction("Cut")
             cut_action.triggered.connect(lambda: self._cut_files(selected_paths))
 
+            # Copy Path
+            copy_path_action = menu.addAction("Copy Path")
+            copy_path_action.triggered.connect(lambda: self._copy_path(selected_paths))
+
             menu.addSeparator()
 
             delete_action = menu.addAction("Delete")
@@ -154,10 +167,15 @@ class FileListView(QListView):
 
             menu.addSeparator()
 
-            # Compress option (for multiple files)
+            # Compress option
             if len(selected_paths) >= 1:
                 compress_action = menu.addAction("Compress to ZIP...")
                 compress_action.triggered.connect(lambda: self._compress_files(selected_paths))
+
+            # Quick Look (macOS)
+            if sys.platform == "darwin" and len(selected_paths) == 1:
+                quicklook_action = menu.addAction("Quick Look")
+                quicklook_action.triggered.connect(lambda: self._quick_look(selected_paths[0]))
 
         menu.addSeparator()
 
@@ -170,6 +188,10 @@ class FileListView(QListView):
         # New folder
         new_folder_action = menu.addAction("New Folder")
         new_folder_action.triggered.connect(self._create_new_folder)
+
+        # New file
+        new_file_action = menu.addAction("New File")
+        new_file_action.triggered.connect(self._create_new_file)
 
         menu.addSeparator()
 
@@ -320,6 +342,89 @@ class FileListView(QListView):
             subprocess.run(["explorer", "/select,", str(path)])
         else:
             subprocess.run(["xdg-open", str(path.parent)])
+
+    def _copy_path(self, paths: list[Path]):
+        """Copy file paths to clipboard."""
+        from PySide6.QtWidgets import QApplication
+        clipboard = QApplication.clipboard()
+        if len(paths) == 1:
+            clipboard.setText(str(paths[0]))
+        else:
+            clipboard.setText("\n".join(str(p) for p in paths))
+
+    def _show_info(self, path: Path):
+        """Show file/folder info dialog."""
+        from commander.widgets.info_dialog import InfoDialog
+        dialog = InfoDialog(path, self)
+        dialog.exec()
+
+    def _quick_look(self, path: Path):
+        """Open Quick Look preview (macOS only)."""
+        if sys.platform == "darwin":
+            subprocess.run(["qlmanage", "-p", str(path)],
+                         stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+
+    def _populate_open_with_menu(self, menu: QMenu, path: Path):
+        """Populate Open With submenu with available apps."""
+        if sys.platform == "darwin":
+            # Get default apps for this file type
+            try:
+                import plistlib
+                result = subprocess.run(
+                    ["mdls", "-name", "kMDItemContentType", "-raw", str(path)],
+                    capture_output=True, text=True
+                )
+                content_type = result.stdout.strip()
+
+                # Get apps that can open this type
+                result = subprocess.run(
+                    ["lsappinfo", "find", "canopen=" + str(path)],
+                    capture_output=True, text=True
+                )
+
+                # Add common apps as fallback
+                common_apps = [
+                    ("TextEdit", "/System/Applications/TextEdit.app"),
+                    ("Preview", "/System/Applications/Preview.app"),
+                    ("VS Code", "/Applications/Visual Studio Code.app"),
+                ]
+
+                for name, app_path in common_apps:
+                    if Path(app_path).exists():
+                        action = menu.addAction(name)
+                        action.triggered.connect(
+                            lambda checked, p=app_path: subprocess.run(["open", "-a", p, str(path)])
+                        )
+
+                menu.addSeparator()
+                other_action = menu.addAction("Other...")
+                other_action.triggered.connect(lambda: self._open_with_other(path))
+
+            except Exception:
+                other_action = menu.addAction("Choose Application...")
+                other_action.triggered.connect(lambda: self._open_with_other(path))
+        else:
+            other_action = menu.addAction("Choose Application...")
+            other_action.triggered.connect(lambda: self._open_with_other(path))
+
+    def _open_with_other(self, path: Path):
+        """Open file with user-selected application."""
+        if sys.platform == "darwin":
+            subprocess.run(["open", "-a", "Finder", str(path)])
+        elif sys.platform == "win32":
+            subprocess.run(["rundll32", "shell32.dll,OpenAs_RunDLL", str(path)])
+
+    def _create_new_file(self):
+        """Create a new empty file."""
+        name, ok = QInputDialog.getText(self, "New File", "File name:")
+        if ok and name:
+            new_path = self._current_path / name
+            try:
+                new_path.touch()
+                self.set_root_path(self._current_path)
+            except OSError as e:
+                QMessageBox.warning(self, "Error", f"Cannot create file: {e}")
 
     def dragEnterEvent(self, event):
         """Handle drag enter."""
