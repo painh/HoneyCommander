@@ -114,10 +114,12 @@ class FullscreenImageViewer(QWidget):
         self._movie: QMovie | None = None
         self._is_animated: bool = False
         self._frame_count: int = 0
-        self._current_frame: int = 0
+        self._current_frame: int = 0  # Currently displayed/playing frame
+        self._selected_frame: int = 0  # User selected frame (for resume)
         self._frame_thumbnails: list[QPixmap] = []
         self._thumbnail_thread: QThread | None = None
         self._thumbnail_worker: ThumbnailWorker | None = None
+        self._current_animated_path: Path | None = None  # For PIL frame loading
 
         self._setup_ui()
 
@@ -271,6 +273,7 @@ class FullscreenImageViewer(QWidget):
 
         self._is_animated = True
         self._frame_count = frame_count
+        self._current_animated_path = path
 
         # Use QMovie for animation playback
         self._movie = QMovie(str(path))
@@ -409,45 +412,87 @@ class FullscreenImageViewer(QWidget):
 
     def _toggle_animation(self):
         """Toggle animation play/pause."""
-        if self._movie:
-            if self._movie.state() == QMovie.MovieState.Running:
-                self._movie.setPaused(True)
-                self._play_button.setText("▶")
-            else:
-                # Use start() instead of setPaused(False) for reliability
-                self._movie.start()
-                self._play_button.setText("⏸")
+        if not self._movie or not self._current_animated_path:
+            return
+
+        if self._movie.state() == QMovie.MovieState.Running:
+            # Pause - remember where we stopped
+            self._movie.setPaused(True)
+            self._selected_frame = self._current_frame
+            self._play_button.setText("▶")
+        else:
+            # Resume - recreate QMovie and start from selected frame
+            self._movie.stop()
+            self._movie.frameChanged.disconnect(self._on_frame_changed)
+
+            self._movie = QMovie(str(self._current_animated_path))
+            self._movie.frameChanged.connect(self._on_frame_changed)
+            self._movie.start()
+
+            # Skip to selected frame by advancing
+            for _ in range(self._selected_frame):
+                self._movie.jumpToNextFrame()
+
+            self._play_button.setText("⏸")
 
     def _jump_to_frame(self, frame_index: int):
         """Jump to specific frame."""
-        if self._movie:
-            was_running = self._movie.state() == QMovie.MovieState.Running
-            self._movie.stop()
-            self._movie.jumpToFrame(frame_index)
-            self._current_frame = frame_index
+        if not self._movie or not self._current_animated_path:
+            return
 
-            # Manually update display since frameChanged won't fire when stopped
-            pixmap = self._movie.currentPixmap()
-            if not pixmap.isNull():
-                new_size = QSize(
-                    int(pixmap.width() * self._zoom_level),
-                    int(pixmap.height() * self._zoom_level),
-                )
-                scaled = pixmap.scaled(
-                    new_size,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                    if self._smooth_filter
-                    else Qt.TransformationMode.FastTransformation,
-                )
-                self._image_label.setPixmap(scaled)
-                self._image_label.resize(scaled.size())
+        was_running = self._movie.state() == QMovie.MovieState.Running
 
-            self._update_frame_info()
-            self._highlight_current_frame()
+        # Pause instead of stop to preserve state
+        if was_running:
+            self._movie.setPaused(True)
 
-            if was_running:
-                self._movie.start()
+        self._current_frame = frame_index
+        self._selected_frame = frame_index  # Remember for resume
+
+        # Load frame directly with PIL (QMovie.jumpToFrame is unreliable)
+        try:
+            from PIL import Image
+            from io import BytesIO
+
+            with Image.open(self._current_animated_path) as img:
+                img.seek(frame_index)
+                frame = img.copy()
+
+                if frame.mode != "RGBA":
+                    frame = frame.convert("RGBA")
+
+                buffer = BytesIO()
+                frame.save(buffer, format="PNG")
+                buffer.seek(0)
+
+                pixmap = QPixmap()
+                pixmap.loadFromData(buffer.getvalue())
+
+                if not pixmap.isNull():
+                    new_size = QSize(
+                        int(pixmap.width() * self._zoom_level),
+                        int(pixmap.height() * self._zoom_level),
+                    )
+                    scaled = pixmap.scaled(
+                        new_size,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                        if self._smooth_filter
+                        else Qt.TransformationMode.FastTransformation,
+                    )
+                    self._image_label.setPixmap(scaled)
+                    self._image_label.resize(scaled.size())
+        except Exception as e:
+            print(f"Error loading frame {frame_index}: {e}")
+
+        # Sync QMovie to current frame
+        self._movie.jumpToFrame(frame_index)
+
+        self._update_frame_info()
+        self._highlight_current_frame()
+
+        if was_running:
+            self._movie.setPaused(False)
 
     def _stop_animation(self):
         """Stop and cleanup animation."""
