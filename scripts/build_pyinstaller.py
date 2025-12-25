@@ -74,9 +74,11 @@ def build():
 
     # Platform-specific options
     if sys.platform == "darwin":
-        args.extend([
-            "--osx-bundle-identifier=com.commander.app",
-        ])
+        args.extend(
+            [
+                "--osx-bundle-identifier=com.commander.app",
+            ]
+        )
 
     print("Building Commander...")
     print(f"Command: {' '.join(args)}")
@@ -86,6 +88,21 @@ def build():
     if result.returncode == 0:
         print("\nBuild successful!")
         print(f"Output: {project_root / 'dist'}")
+
+        # macOS: ad-hoc code signing to avoid "unidentified developer" warning
+        if sys.platform == "darwin":
+            app_path = project_root / "dist" / "Commander.app"
+            if app_path.exists():
+                print("\nSigning app with ad-hoc signature...")
+                sign_result = subprocess.run(
+                    ["codesign", "--force", "--deep", "--sign", "-", str(app_path)],
+                    capture_output=True,
+                    text=True,
+                )
+                if sign_result.returncode == 0:
+                    print("App signed successfully!")
+                else:
+                    print(f"Warning: Signing failed: {sign_result.stderr}")
     else:
         print("\nBuild failed!")
         sys.exit(1)
