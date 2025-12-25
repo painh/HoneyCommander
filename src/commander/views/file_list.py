@@ -65,6 +65,9 @@ class FileListView(QListView):
         self.clicked.connect(self._on_clicked)
         self.doubleClicked.connect(self._on_double_clicked)
 
+        # Selection change (for keyboard navigation)
+        self.selectionModel().selectionChanged.connect(self._on_selection_changed)
+
         # Default view mode
         self.set_view_mode("list")
 
@@ -73,6 +76,13 @@ class FileListView(QListView):
         self._current_path = path
         self._model.setRootPath(str(path))
         self.setRootIndex(self._model.index(str(path)))
+
+        # Reconnect selection changed signal (model change can disconnect it)
+        try:
+            self.selectionModel().selectionChanged.disconnect(self._on_selection_changed)
+        except (RuntimeError, TypeError):
+            pass
+        self.selectionModel().selectionChanged.connect(self._on_selection_changed)
 
     def set_view_mode(self, mode: str):
         """Change view mode (list, icons, thumbnails)."""
@@ -100,6 +110,13 @@ class FileListView(QListView):
         """Handle single click - select and preview."""
         path = Path(self._model.filePath(index))
         self.item_selected.emit(path)
+
+    def _on_selection_changed(self, selected, deselected):
+        """Handle selection change (keyboard navigation)."""
+        indexes = self.selectedIndexes()
+        if indexes:
+            path = Path(self._model.filePath(indexes[0]))
+            self.item_selected.emit(path)
 
     def _on_double_clicked(self, index: QModelIndex):
         """Handle double click - activate (open/navigate)."""
