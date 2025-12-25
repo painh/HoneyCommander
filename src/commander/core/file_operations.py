@@ -1,17 +1,33 @@
 """File operations (copy, paste, delete, etc.)."""
 
 import shutil
+import threading
 from pathlib import Path
+from typing import Callable
 
 import send2trash
 
 
 class FileOperations:
-    """Handle file operations with clipboard support."""
+    """Handle file operations with clipboard support (Singleton)."""
+
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
 
     def __init__(self):
+        if self._initialized:
+            return
         self._clipboard: list[Path] = []
         self._clipboard_mode: str = "copy"  # "copy" or "cut"
+        self._initialized = True
 
     def copy_to_clipboard(self, paths: list[Path]):
         """Copy paths to internal clipboard."""
@@ -23,29 +39,65 @@ class FileOperations:
         self._clipboard = paths.copy()
         self._clipboard_mode = "cut"
 
-    def paste(self, destination: Path) -> int:
-        """Paste clipboard contents to destination."""
+    def has_clipboard(self) -> bool:
+        """Check if clipboard has content."""
+        return len(self._clipboard) > 0
+
+    def get_clipboard_info(self) -> tuple[list[Path], str]:
+        """Get clipboard contents and mode."""
+        return self._clipboard.copy(), self._clipboard_mode
+
+    def paste(self, destination: Path, progress_callback: Callable[[int, int, str], bool] | None = None) -> int:
+        """Paste clipboard contents to destination.
+
+        progress_callback(current, total, current_file) -> should_cancel
+        """
         if not self._clipboard:
             return 0
 
+        # Calculate total size for progress
+        total_size = 0
+        files_to_copy = []
+        for src in self._clipboard:
+            if src.exists():
+                if src.is_dir():
+                    for f in src.rglob("*"):
+                        if f.is_file():
+                            total_size += f.stat().st_size
+                            files_to_copy.append((f, destination / src.name / f.relative_to(src)))
+                else:
+                    total_size += src.stat().st_size
+                    files_to_copy.append((src, destination / src.name))
+
+        copied_size = 0
         count = 0
+
         for src in self._clipboard:
             try:
                 if not src.exists():
                     continue
 
                 dst = destination / src.name
-
-                # Handle name conflicts
                 dst = self._get_unique_path(dst)
 
                 if self._clipboard_mode == "cut":
+                    if progress_callback:
+                        size = self._get_size(src)
+                        if progress_callback(copied_size, total_size, src.name):
+                            break  # Cancelled
+                        copied_size += size
                     shutil.move(str(src), str(dst))
                 else:
                     if src.is_dir():
-                        shutil.copytree(str(src), str(dst))
+                        copied_size = self._copytree_with_progress(
+                            src, dst, copied_size, total_size, progress_callback
+                        )
                     else:
+                        if progress_callback:
+                            if progress_callback(copied_size, total_size, src.name):
+                                break
                         shutil.copy2(str(src), str(dst))
+                        copied_size += src.stat().st_size
                 count += 1
             except OSError:
                 pass
@@ -55,9 +107,52 @@ class FileOperations:
 
         return count
 
-    def copy(self, sources: list[Path], destination: Path) -> int:
+    def _copytree_with_progress(
+        self,
+        src: Path,
+        dst: Path,
+        copied_size: int,
+        total_size: int,
+        progress_callback: Callable[[int, int, str], bool] | None
+    ) -> int:
+        """Copy directory tree with progress reporting."""
+        dst.mkdir(parents=True, exist_ok=True)
+
+        for item in src.iterdir():
+            s = item
+            d = dst / item.name
+
+            if s.is_dir():
+                copied_size = self._copytree_with_progress(
+                    s, d, copied_size, total_size, progress_callback
+                )
+            else:
+                if progress_callback:
+                    if progress_callback(copied_size, total_size, s.name):
+                        return copied_size  # Cancelled
+                shutil.copy2(str(s), str(d))
+                copied_size += s.stat().st_size
+
+        return copied_size
+
+    def _get_size(self, path: Path) -> int:
+        """Get size of file or directory."""
+        if path.is_file():
+            return path.stat().st_size
+        total = 0
+        for f in path.rglob("*"):
+            if f.is_file():
+                total += f.stat().st_size
+        return total
+
+    def copy(self, sources: list[Path], destination: Path,
+             progress_callback: Callable[[int, int, str], bool] | None = None) -> int:
         """Copy files to destination."""
+        # Calculate total
+        total_size = sum(self._get_size(s) for s in sources if s.exists())
+        copied_size = 0
         count = 0
+
         for src in sources:
             try:
                 if not src.exists():
@@ -67,17 +162,27 @@ class FileOperations:
                 dst = self._get_unique_path(dst)
 
                 if src.is_dir():
-                    shutil.copytree(str(src), str(dst))
+                    copied_size = self._copytree_with_progress(
+                        src, dst, copied_size, total_size, progress_callback
+                    )
                 else:
+                    if progress_callback:
+                        if progress_callback(copied_size, total_size, src.name):
+                            break
                     shutil.copy2(str(src), str(dst))
+                    copied_size += src.stat().st_size
                 count += 1
             except OSError:
                 pass
         return count
 
-    def move(self, sources: list[Path], destination: Path) -> int:
+    def move(self, sources: list[Path], destination: Path,
+             progress_callback: Callable[[int, int, str], bool] | None = None) -> int:
         """Move files to destination."""
+        total_size = sum(self._get_size(s) for s in sources if s.exists())
+        moved_size = 0
         count = 0
+
         for src in sources:
             try:
                 if not src.exists():
@@ -86,7 +191,12 @@ class FileOperations:
                 dst = destination / src.name
                 dst = self._get_unique_path(dst)
 
+                if progress_callback:
+                    if progress_callback(moved_size, total_size, src.name):
+                        break
+
                 shutil.move(str(src), str(dst))
+                moved_size += self._get_size(dst)
                 count += 1
             except OSError:
                 pass
