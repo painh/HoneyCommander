@@ -26,8 +26,8 @@ def get_images_in_folder(folder: Path) -> list[Path]:
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("Commander")
-    app.setOrganizationName("Commander")
+    app.setApplicationName("꿀 커맨더")
+    app.setOrganizationName("HoneyCommander")
 
     # Check if an image file was passed as argument
     if len(sys.argv) > 1:
