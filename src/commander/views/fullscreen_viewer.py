@@ -28,6 +28,7 @@ from PySide6.QtGui import (
 )
 
 from commander.core.image_loader import load_pixmap
+from commander.utils.settings import Settings
 
 
 class ThumbnailWorker(QObject):
@@ -92,6 +93,7 @@ class FullscreenImageViewer(QWidget):
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
+        self._settings = Settings()
         self._image_list: list[Path] = []
         self._current_index: int = 0
         self._zoom_level: float = 1.0
@@ -120,6 +122,7 @@ class FullscreenImageViewer(QWidget):
         self._thumbnail_thread: QThread | None = None
         self._thumbnail_worker: ThumbnailWorker | None = None
         self._current_animated_path: Path | None = None  # For PIL frame loading
+        self._anim_thumb_size: int = self._settings.load_animation_thumb_size()
 
         self._setup_ui()
 
@@ -321,7 +324,7 @@ class FullscreenImageViewer(QWidget):
                 item.widget().deleteLater()
 
         # Create placeholder labels for all frames
-        thumb_size = 70
+        thumb_size = self._anim_thumb_size
         for i in range(self._frame_count):
             thumb_label = QLabel()
             thumb_label.setFixedSize(thumb_size, thumb_size)

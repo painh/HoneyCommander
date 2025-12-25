@@ -79,6 +79,9 @@
 
   "select_file_to_preview": "選擇要預覽的檔案",
   "cannot_load_image": "無法載入圖片",
+  "filter": "濾鏡",
+  "filter_crispy": "銳利",
+  "filter_smooth": "平滑",
 
   "favorites": "喜好項目",
   "add_to_favorites": "加入喜好項目",
@@ -90,6 +93,17 @@
   "error_creating_folder": "建立資料夾錯誤: {name}",
 
   "settings": "設定",
+  "settings_general": "一般",
+  "settings_view": "顯示",
+  "settings_search": "搜尋",
+  "settings_performance": "效能",
+  "settings_thumbnails": "縮圖",
+  "settings_thumbnail_size": "縮圖大小:",
+  "settings_anim_thumb_size": "動畫影格大小:",
+  "settings_fuzzy_timeout": "模糊搜尋逾時:",
+  "settings_max_results": "最大搜尋結果數:",
+  "settings_cache_size": "縮圖快取數:",
+  "settings_undo_stack": "復原堆疊大小:",
 
   "shortcuts": "鍵盤快速鍵",
   "about": "關於",

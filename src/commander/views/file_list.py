@@ -5,10 +5,23 @@ import subprocess
 from pathlib import Path
 from enum import Enum
 
-from PySide6.QtCore import Qt, Signal, QDir, QModelIndex, QSize, QMimeData, QUrl, QPoint, QRect
+from PySide6.QtCore import (
+    Qt,
+    Signal,
+    QDir,
+    QModelIndex,
+    QSize,
+    QMimeData,
+    QUrl,
+    QPoint,
+    QRect,
+    QTimer,
+    QSortFilterProxyModel,
+)
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
+    QHBoxLayout,
     QListView,
     QTreeView,
     QFileSystemModel,
@@ -21,10 +34,22 @@ from PySide6.QtWidgets import (
     QApplication,
     QStackedWidget,
     QHeaderView,
+    QLineEdit,
+    QLabel,
 )
-from PySide6.QtGui import QDrag, QAction, QCursor, QPainter, QPixmap, QIcon, QDragEnterEvent, QDropEvent
+from PySide6.QtGui import (
+    QDrag,
+    QAction,
+    QCursor,
+    QPainter,
+    QPixmap,
+    QIcon,
+    QDragEnterEvent,
+    QDropEvent,
+)
 
 from commander.core.thumbnail_provider import get_thumbnail_provider
+from commander.utils.settings import Settings
 
 
 class DropEnabledTreeView(QTreeView):
@@ -148,7 +173,7 @@ class ThumbnailDelegate(QStyledItemDelegate):
                 option.rect.x() + (option.rect.width() - thumbnail.width()) // 2,
                 option.rect.y() + 5,
                 thumbnail.width(),
-                thumbnail.height()
+                thumbnail.height(),
             )
             painter.drawPixmap(thumb_rect, thumbnail)
 
@@ -157,17 +182,23 @@ class ThumbnailDelegate(QStyledItemDelegate):
                 option.rect.x(),
                 option.rect.y() + option.rect.height() - 35,
                 option.rect.width(),
-                30
+                30,
             )
 
-            text_color = option.palette.highlightedText().color() if option.state & QStyle.StateFlag.State_Selected else option.palette.text().color()
+            text_color = (
+                option.palette.highlightedText().color()
+                if option.state & QStyle.StateFlag.State_Selected
+                else option.palette.text().color()
+            )
             painter.setPen(text_color)
 
             file_name = model.fileName(index)
             elided = painter.fontMetrics().elidedText(
                 file_name, Qt.TextElideMode.ElideMiddle, text_rect.width() - 4
             )
-            painter.drawText(text_rect, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, elided)
+            painter.drawText(
+                text_rect, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, elided
+            )
         else:
             # Default painting for non-images
             super().paint(painter, option, index)
@@ -194,6 +225,14 @@ class FileListView(QWidget):
 
         self._view_mode = ViewMode.LIST
         self._current_path: Path | None = None
+
+        # Fuzzy search
+        self._settings = Settings()
+        self._search_text = ""
+        self._search_timer = QTimer()
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(self._settings.load_fuzzy_search_timeout())
+        self._search_timer.timeout.connect(self._clear_search)
 
         self._setup_ui()
 
@@ -260,6 +299,25 @@ class FileListView(QWidget):
 
         # Default: list mode (tree view)
         self._stack.setCurrentWidget(self._tree_view)
+
+        # Search overlay (hidden by default)
+        self._search_label = QLabel(self)
+        self._search_label.setStyleSheet("""
+            QLabel {
+                background-color: rgba(0, 120, 212, 0.9);
+                color: white;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+        """)
+        self._search_label.hide()
+        self._search_label.raise_()  # Ensure it's on top
+
+        # Install event filter to capture key events from views
+        self._tree_view.installEventFilter(self)
+        self._list_view.installEventFilter(self)
 
     def _current_view(self) -> QAbstractItemView:
         """Get the current active view."""
@@ -472,7 +530,9 @@ class FileListView(QWidget):
         else:
             reveal_action = menu.addAction("Open in File Manager")
         reveal_action.triggered.connect(
-            lambda: self._reveal_in_finder(selected_paths[0] if selected_paths else self._current_path)
+            lambda: self._reveal_in_finder(
+                selected_paths[0] if selected_paths else self._current_path
+            )
         )
 
         view = self._current_view()
@@ -484,6 +544,7 @@ class FileListView(QWidget):
             subprocess.run(["open", str(path)])
         elif sys.platform == "win32":
             import os
+
             os.startfile(str(path))
         else:
             subprocess.run(["xdg-open", str(path)])
@@ -491,12 +552,14 @@ class FileListView(QWidget):
     def _copy_files(self, paths: list[Path]):
         """Copy files to clipboard."""
         from commander.core.file_operations import FileOperations
+
         ops = FileOperations()
         ops.copy_to_clipboard(paths)
 
     def _cut_files(self, paths: list[Path]):
         """Cut files to clipboard."""
         from commander.core.file_operations import FileOperations
+
         ops = FileOperations()
         ops.cut_to_clipboard(paths)
 
@@ -517,6 +580,7 @@ class FileListView(QWidget):
     def _delete_files(self, paths: list[Path]):
         """Delete files."""
         from commander.core.file_operations import FileOperations
+
         reply = QMessageBox.question(
             self,
             "Delete",
@@ -545,9 +609,7 @@ class FileListView(QWidget):
 
         # Ask for zip file name
         default_name = paths[0].stem if len(paths) == 1 else "archive"
-        name, ok = QInputDialog.getText(
-            self, "Compress", "Archive name:", text=default_name
-        )
+        name, ok = QInputDialog.getText(self, "Compress", "Archive name:", text=default_name)
         if not ok or not name:
             return
 
@@ -619,15 +681,16 @@ class FileListView(QWidget):
     def _show_info(self, path: Path):
         """Show file/folder info dialog."""
         from commander.widgets.info_dialog import InfoDialog
+
         dialog = InfoDialog(path, self)
         dialog.exec()
 
     def _quick_look(self, path: Path):
         """Open Quick Look preview (macOS only)."""
         if sys.platform == "darwin":
-            subprocess.run(["qlmanage", "-p", str(path)],
-                         stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL)
+            subprocess.run(
+                ["qlmanage", "-p", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
 
     def _populate_open_with_menu(self, menu: QMenu, path: Path):
         """Populate Open With submenu with available apps."""
@@ -691,7 +754,9 @@ class FileListView(QWidget):
             "Drop Files",
             f"Copy {len(paths_to_copy)} item(s) to this folder?\n\n"
             f"Click 'Yes' to copy, 'No' to move.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No
+            | QMessageBox.StandardButton.Cancel,
         )
 
         if reply == QMessageBox.StandardButton.Cancel:
@@ -708,3 +773,110 @@ class FileListView(QWidget):
             dialog.exec()
 
         self.set_root_path(self._current_path)
+
+    def eventFilter(self, obj, event):
+        """Filter key events from child views for fuzzy search."""
+        if event.type() == event.Type.KeyPress:
+            key = event.key()
+            text = event.text()
+
+            # Escape clears search
+            if key == Qt.Key.Key_Escape and self._search_text:
+                self._clear_search()
+                return True
+
+            # Backspace removes last character from search
+            if key == Qt.Key.Key_Backspace and self._search_text:
+                self._search_text = self._search_text[:-1]
+                if self._search_text:
+                    self._do_fuzzy_search()
+                else:
+                    self._clear_search()
+                return True
+
+            # Only handle printable characters (no modifiers except shift)
+            modifiers = event.modifiers()
+            has_ctrl_or_meta = modifiers & (
+                Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier
+            )
+
+            if text and text.isprintable() and not has_ctrl_or_meta:
+                self._search_text += text.lower()
+                self._do_fuzzy_search()
+                self._search_timer.start()
+                return True
+
+        return super().eventFilter(obj, event)
+
+    def _do_fuzzy_search(self):
+        """Perform fuzzy search and select matching file."""
+        if not self._search_text or not self._current_path:
+            return
+
+        # Show search overlay
+        self._search_label.setText(f"🔍 {self._search_text}")
+        self._search_label.adjustSize()
+        self._search_label.move(10, self.height() - self._search_label.height() - 10)
+        self._search_label.show()
+
+        # Get all items in current directory
+        view = self._current_view()
+        model = self._model
+        root_index = view.rootIndex()
+
+        best_match = None
+        best_score = -1
+
+        for row in range(model.rowCount(root_index)):
+            index = model.index(row, 0, root_index)
+            filename = model.fileName(index).lower()
+
+            # Calculate fuzzy match score
+            score = self._fuzzy_score(self._search_text, filename)
+            if score > best_score:
+                best_score = score
+                best_match = index
+
+        # Select best match
+        if best_match and best_score > 0:
+            view.setCurrentIndex(best_match)
+            view.scrollTo(best_match)
+            self._on_clicked(best_match)
+
+    def _fuzzy_score(self, pattern: str, text: str) -> int:
+        """Calculate fuzzy match score. Higher is better."""
+        if not pattern:
+            return 0
+
+        # Exact prefix match gets highest score
+        if text.startswith(pattern):
+            return 1000 + len(pattern)
+
+        # Check if all characters appear in order
+        pattern_idx = 0
+        score = 0
+        consecutive = 0
+
+        for i, char in enumerate(text):
+            if pattern_idx < len(pattern) and char == pattern[pattern_idx]:
+                pattern_idx += 1
+                consecutive += 1
+                # Bonus for consecutive matches
+                score += consecutive * 10
+                # Bonus for match at start
+                if i == 0:
+                    score += 50
+            else:
+                consecutive = 0
+
+        # All pattern characters must be found
+        if pattern_idx < len(pattern):
+            return 0
+
+        return score
+
+    def _clear_search(self):
+        """Clear fuzzy search."""
+        self._search_text = ""
+        self._search_label.hide()
+        self._search_timer.stop()

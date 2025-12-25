@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from commander.views.preview_panel import PreviewPanel
+from commander.utils.settings import Settings
 
 
 class SearchWorker(QThread):
@@ -103,6 +104,8 @@ class SearchDialog(QDialog):
         self._root_path = root_path
         self._selected_path: Path | None = None
         self._worker: SearchWorker | None = None
+        self._settings = Settings()
+        self._max_results = self._settings.load_search_max_results()
 
         self._setup_ui()
         self.setWindowTitle("Search Files (F3)")
@@ -199,9 +202,7 @@ class SearchDialog(QDialog):
 
         # Start new search
         self._status_label.setText("Searching...")
-        self._worker = SearchWorker(
-            self._root_path, text, self._recursive_check.isChecked()
-        )
+        self._worker = SearchWorker(self._root_path, text, self._recursive_check.isChecked())
         self._worker.result_found.connect(self._on_result_found)
         self._worker.search_finished.connect(self._on_search_finished)
         self._worker.start()
@@ -209,7 +210,7 @@ class SearchDialog(QDialog):
     def _on_result_found(self, path_str: str):
         """Handle search result."""
         # Limit results
-        if self._results_list.count() >= 100:
+        if self._results_list.count() >= self._max_results:
             return
 
         path = Path(path_str)
@@ -224,13 +225,9 @@ class SearchDialog(QDialog):
 
         # Set icon
         if path.is_dir():
-            item.setIcon(self.style().standardIcon(
-                self.style().StandardPixmap.SP_DirIcon
-            ))
+            item.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DirIcon))
         else:
-            item.setIcon(self.style().standardIcon(
-                self.style().StandardPixmap.SP_FileIcon
-            ))
+            item.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_FileIcon))
 
         self._results_list.addItem(item)
         self._go_button.setEnabled(True)
@@ -238,8 +235,10 @@ class SearchDialog(QDialog):
     def _on_search_finished(self):
         """Handle search completion."""
         count = self._results_list.count()
-        if count >= 100:
-            self._status_label.setText(f"Found 100+ results (showing first 100)")
+        if count >= self._max_results:
+            self._status_label.setText(
+                f"Found {self._max_results}+ results (showing first {self._max_results})"
+            )
         else:
             self._status_label.setText(f"Found {count} result(s)")
 

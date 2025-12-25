@@ -3,13 +3,15 @@
 from pathlib import Path
 from datetime import datetime
 
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QFileSystemWatcher
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
+    QHBoxLayout,
     QLabel,
     QScrollArea,
     QSizePolicy,
+    QComboBox,
 )
 from PySide6.QtGui import QPixmap
 
@@ -25,12 +27,37 @@ class PreviewPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._current_path: Path | None = None
+        self._smooth_filter: bool = False  # Crispy/sharp by default
+
+        # File watcher for auto-refresh
+        self._watcher = QFileSystemWatcher(self)
+        self._watcher.fileChanged.connect(self._on_file_changed)
+
         self._setup_ui()
 
     def _setup_ui(self):
         """Setup UI."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
+
+        # Filter selector at top
+        filter_layout = QHBoxLayout()
+        filter_layout.setContentsMargins(0, 0, 0, 5)
+
+        filter_label = QLabel(tr("filter") + ":")
+        filter_label.setStyleSheet("font-size: 11px;")
+        self._filter_combo = QComboBox()
+        self._filter_combo.addItem(tr("filter_crispy"), False)  # Sharp/Crispy
+        self._filter_combo.addItem(tr("filter_smooth"), True)  # Smooth
+        self._filter_combo.setCurrentIndex(0)  # Crispy by default
+        self._filter_combo.currentIndexChanged.connect(self._on_filter_changed)
+        self._filter_combo.setFixedWidth(100)
+
+        filter_layout.addWidget(filter_label)
+        filter_layout.addWidget(self._filter_combo)
+        filter_layout.addStretch()
+
+        layout.addLayout(filter_layout)
 
         # Scroll area for image
         self._scroll_area = QScrollArea()
@@ -39,9 +66,7 @@ class PreviewPanel(QWidget):
 
         self._image_label = QLabel()
         self._image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._image_label.setSizePolicy(
-            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored
-        )
+        self._image_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self._scroll_area.setWidget(self._image_label)
 
         # File info
@@ -55,6 +80,13 @@ class PreviewPanel(QWidget):
         # Show placeholder
         self._show_placeholder()
 
+    def _on_filter_changed(self, index: int):
+        """Handle filter selection change."""
+        self._smooth_filter = self._filter_combo.currentData()
+        # Refresh preview if we have an image
+        if self._current_path and self._current_path.suffix.lower() in self.SUPPORTED_IMAGES:
+            self._show_image_preview(self._current_path)
+
     def _show_placeholder(self):
         """Show placeholder when nothing is selected."""
         self._image_label.clear()
@@ -62,11 +94,19 @@ class PreviewPanel(QWidget):
 
     def show_preview(self, path: Path):
         """Show preview for selected file."""
+        # Remove old watch
+        if self._current_path and self._watcher.files():
+            self._watcher.removePaths(self._watcher.files())
+
         self._current_path = path
 
         if not path.exists():
             self._show_placeholder()
             return
+
+        # Watch this file for changes
+        if path.is_file():
+            self._watcher.addPath(str(path))
 
         # Show file info
         self._show_file_info(path)
@@ -77,16 +117,31 @@ class PreviewPanel(QWidget):
         else:
             self._image_label.clear()
 
+    def _on_file_changed(self, path: str):
+        """Handle file change - refresh preview."""
+        changed_path = Path(path)
+        if self._current_path and changed_path == self._current_path:
+            # Re-add to watcher (Qt removes it after change)
+            if changed_path.exists():
+                self._watcher.addPath(str(changed_path))
+                self._show_image_preview(changed_path)
+                self._show_file_info(changed_path)
+
     def _show_image_preview(self, path: Path):
         """Show image preview."""
         try:
             pixmap = load_pixmap(path)
             if not pixmap.isNull():
                 # Scale to fit while maintaining aspect ratio
+                transform_mode = (
+                    Qt.TransformationMode.SmoothTransformation
+                    if self._smooth_filter
+                    else Qt.TransformationMode.FastTransformation
+                )
                 scaled = pixmap.scaled(
                     self._scroll_area.size() - QSize(20, 20),
                     Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
+                    transform_mode,
                 )
                 self._image_label.setPixmap(scaled)
             else:

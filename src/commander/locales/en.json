@@ -79,6 +79,9 @@
 
   "select_file_to_preview": "Select a file to preview",
   "cannot_load_image": "Cannot load image",
+  "filter": "Filter",
+  "filter_crispy": "Crispy",
+  "filter_smooth": "Smooth",
 
   "favorites": "Favorites",
   "add_to_favorites": "Add to Favorites",
@@ -90,6 +93,17 @@
   "error_creating_folder": "Error creating folder: {name}",
 
   "settings": "Settings",
+  "settings_general": "General",
+  "settings_view": "View",
+  "settings_search": "Search",
+  "settings_performance": "Performance",
+  "settings_thumbnails": "Thumbnails",
+  "settings_thumbnail_size": "Thumbnail size:",
+  "settings_anim_thumb_size": "Animation frame size:",
+  "settings_fuzzy_timeout": "Fuzzy search timeout:",
+  "settings_max_results": "Max search results:",
+  "settings_cache_size": "Thumbnail cache size:",
+  "settings_undo_stack": "Undo stack size:",
 
   "shortcuts": "Keyboard Shortcuts",
   "about": "About",
