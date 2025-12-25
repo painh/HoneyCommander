@@ -7,6 +7,8 @@ from typing import Callable
 
 import send2trash
 
+from commander.core.undo_manager import get_undo_manager
+
 
 class FileOperations:
     """Handle file operations with clipboard support (Singleton)."""
@@ -71,6 +73,8 @@ class FileOperations:
 
         copied_size = 0
         count = 0
+        sources_for_undo = []
+        dests_for_undo = []
 
         for src in self._clipboard:
             try:
@@ -86,7 +90,9 @@ class FileOperations:
                         if progress_callback(copied_size, total_size, src.name):
                             break  # Cancelled
                         copied_size += size
+                    sources_for_undo.append(src)
                     shutil.move(str(src), str(dst))
+                    dests_for_undo.append(dst)
                 else:
                     if src.is_dir():
                         copied_size = self._copytree_with_progress(
@@ -98,9 +104,19 @@ class FileOperations:
                                 break
                         shutil.copy2(str(src), str(dst))
                         copied_size += src.stat().st_size
+                    sources_for_undo.append(src)
+                    dests_for_undo.append(dst)
                 count += 1
             except OSError:
                 pass
+
+        # Record for undo
+        if count > 0:
+            undo_mgr = get_undo_manager()
+            if self._clipboard_mode == "cut":
+                undo_mgr.record_move(sources_for_undo, dests_for_undo)
+            else:
+                undo_mgr.record_copy(sources_for_undo, dests_for_undo)
 
         if self._clipboard_mode == "cut":
             self._clipboard.clear()
@@ -152,6 +168,8 @@ class FileOperations:
         total_size = sum(self._get_size(s) for s in sources if s.exists())
         copied_size = 0
         count = 0
+        sources_for_undo = []
+        dests_for_undo = []
 
         for src in sources:
             try:
@@ -171,9 +189,16 @@ class FileOperations:
                             break
                     shutil.copy2(str(src), str(dst))
                     copied_size += src.stat().st_size
+                sources_for_undo.append(src)
+                dests_for_undo.append(dst)
                 count += 1
             except OSError:
                 pass
+
+        # Record for undo
+        if count > 0:
+            get_undo_manager().record_copy(sources_for_undo, dests_for_undo)
+
         return count
 
     def move(self, sources: list[Path], destination: Path,
@@ -182,6 +207,8 @@ class FileOperations:
         total_size = sum(self._get_size(s) for s in sources if s.exists())
         moved_size = 0
         count = 0
+        sources_for_undo = []
+        dests_for_undo = []
 
         for src in sources:
             try:
@@ -195,16 +222,24 @@ class FileOperations:
                     if progress_callback(moved_size, total_size, src.name):
                         break
 
+                sources_for_undo.append(src)
                 shutil.move(str(src), str(dst))
+                dests_for_undo.append(dst)
                 moved_size += self._get_size(dst)
                 count += 1
             except OSError:
                 pass
+
+        # Record for undo
+        if count > 0:
+            get_undo_manager().record_move(sources_for_undo, dests_for_undo)
+
         return count
 
     def delete(self, paths: list[Path], use_trash: bool = True) -> int:
         """Delete files (move to trash by default)."""
         count = 0
+        deleted_paths = []
         for path in paths:
             try:
                 if not path.exists():
@@ -217,16 +252,25 @@ class FileOperations:
                         shutil.rmtree(str(path))
                     else:
                         path.unlink()
+                deleted_paths.append(path)
                 count += 1
             except OSError:
                 pass
+
+        # Record for undo (note: delete from trash is not supported)
+        if count > 0:
+            get_undo_manager().record_delete(deleted_paths)
+
         return count
 
     def rename(self, path: Path, new_name: str) -> Path | None:
         """Rename file or folder."""
         try:
             new_path = path.parent / new_name
+            old_path = path
             path.rename(new_path)
+            # Record for undo
+            get_undo_manager().record_rename(old_path, new_path)
             return new_path
         except OSError:
             return None
@@ -236,6 +280,8 @@ class FileOperations:
         try:
             new_path = parent / name
             new_path.mkdir()
+            # Record for undo
+            get_undo_manager().record_create_folder(new_path)
             return new_path
         except OSError:
             return None

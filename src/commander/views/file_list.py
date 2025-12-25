@@ -5,16 +5,26 @@ import subprocess
 from pathlib import Path
 from enum import Enum
 
-from PySide6.QtCore import Qt, Signal, QDir, QModelIndex, QSize, QMimeData, QUrl, QPoint
+from PySide6.QtCore import Qt, Signal, QDir, QModelIndex, QSize, QMimeData, QUrl, QPoint, QRect
 from PySide6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
     QListView,
+    QTreeView,
     QFileSystemModel,
     QAbstractItemView,
     QMenu,
     QInputDialog,
     QMessageBox,
+    QStyledItemDelegate,
+    QStyle,
+    QApplication,
+    QStackedWidget,
+    QHeaderView,
 )
-from PySide6.QtGui import QDrag, QAction, QCursor
+from PySide6.QtGui import QDrag, QAction, QCursor, QPainter, QPixmap, QIcon
+
+from commander.core.thumbnail_provider import get_thumbnail_provider
 
 
 class ViewMode(Enum):
@@ -23,88 +33,207 @@ class ViewMode(Enum):
     THUMBNAILS = "thumbnails"
 
 
-class FileListView(QListView):
-    """Center panel file list view."""
+class ThumbnailDelegate(QStyledItemDelegate):
+    """Custom delegate for displaying image thumbnails."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._thumbnail_provider = get_thumbnail_provider()
+        self._thumbnail_provider.thumbnail_ready.connect(self._on_thumbnail_ready)
+        self._view = parent
+
+    def _on_thumbnail_ready(self, path_str: str):
+        """Handle thumbnail ready - trigger repaint."""
+        if self._view:
+            self._view.viewport().update()
+
+    def paint(self, painter: QPainter, option, index: QModelIndex):
+        """Paint the item with thumbnail if available."""
+        # Get file path from model
+        model = index.model()
+        file_path = Path(model.filePath(index))
+
+        # Check if it's an image and we have a thumbnail
+        thumbnail = None
+        if file_path.is_file() and self._thumbnail_provider.is_supported(file_path):
+            thumbnail = self._thumbnail_provider.get_thumbnail(file_path)
+
+        if thumbnail:
+            # Draw selection background
+            if option.state & QStyle.StateFlag.State_Selected:
+                painter.fillRect(option.rect, option.palette.highlight())
+
+            # Calculate centered position for thumbnail
+            thumb_rect = QRect(
+                option.rect.x() + (option.rect.width() - thumbnail.width()) // 2,
+                option.rect.y() + 5,
+                thumbnail.width(),
+                thumbnail.height()
+            )
+            painter.drawPixmap(thumb_rect, thumbnail)
+
+            # Draw filename below thumbnail
+            text_rect = QRect(
+                option.rect.x(),
+                option.rect.y() + option.rect.height() - 35,
+                option.rect.width(),
+                30
+            )
+
+            text_color = option.palette.highlightedText().color() if option.state & QStyle.StateFlag.State_Selected else option.palette.text().color()
+            painter.setPen(text_color)
+
+            file_name = model.fileName(index)
+            elided = painter.fontMetrics().elidedText(
+                file_name, Qt.TextElideMode.ElideMiddle, text_rect.width() - 4
+            )
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, elided)
+        else:
+            # Default painting for non-images
+            super().paint(painter, option, index)
+
+
+class FileListView(QWidget):
+    """Center panel file list view with multiple view modes."""
 
     item_selected = Signal(Path)
     item_activated = Signal(Path)
-    request_compress = Signal(list)  # Signal to request compression
-    request_terminal = Signal(Path)  # Signal to open terminal at path
+    request_compress = Signal(list)
+    request_terminal = Signal(Path)
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
         self._model = QFileSystemModel()
-        # Show hidden files and all entries
         self._model.setFilter(
             QDir.Filter.AllEntries
             | QDir.Filter.NoDotAndDotDot
             | QDir.Filter.Hidden
             | QDir.Filter.System
         )
-        self.setModel(self._model)
 
         self._view_mode = ViewMode.LIST
         self._current_path: Path | None = None
 
-        # Selection
-        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self._setup_ui()
 
-        # Drag and drop
-        self.setDragEnabled(True)
-        self.setAcceptDrops(True)
-        self.setDropIndicatorShown(True)
-        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
-        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+    def _setup_ui(self):
+        """Setup the stacked widget with different views."""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # Context menu - use custom menu
-        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.customContextMenuRequested.connect(self._show_context_menu)
+        self._stack = QStackedWidget()
+        layout.addWidget(self._stack)
 
-        # Signals
-        self.clicked.connect(self._on_clicked)
-        self.doubleClicked.connect(self._on_double_clicked)
+        # Tree view for list mode (with columns)
+        self._tree_view = QTreeView()
+        self._tree_view.setModel(self._model)
+        self._tree_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self._tree_view.setDragEnabled(True)
+        self._tree_view.setAcceptDrops(True)
+        self._tree_view.setDropIndicatorShown(True)
+        self._tree_view.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self._tree_view.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self._tree_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._tree_view.customContextMenuRequested.connect(self._show_context_menu)
+        self._tree_view.clicked.connect(self._on_clicked)
+        self._tree_view.doubleClicked.connect(self._on_double_clicked)
+        self._tree_view.setRootIsDecorated(False)  # Don't show expand arrows
+        self._tree_view.setSortingEnabled(True)
+        self._tree_view.sortByColumn(0, Qt.SortOrder.AscendingOrder)
 
-        # Selection change (for keyboard navigation)
-        self.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        # Configure header
+        header = self._tree_view.header()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Name stretches
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Size
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Type
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Date
 
-        # Default view mode
-        self.set_view_mode("list")
+        self._stack.addWidget(self._tree_view)
+
+        # List view for icons/thumbnails mode
+        self._list_view = QListView()
+        self._list_view.setModel(self._model)
+        self._list_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self._list_view.setDragEnabled(True)
+        self._list_view.setAcceptDrops(True)
+        self._list_view.setDropIndicatorShown(True)
+        self._list_view.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self._list_view.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self._list_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._list_view.customContextMenuRequested.connect(self._show_context_menu)
+        self._list_view.clicked.connect(self._on_clicked)
+        self._list_view.doubleClicked.connect(self._on_double_clicked)
+
+        # Thumbnail delegate
+        self._thumbnail_delegate = ThumbnailDelegate(self._list_view)
+        self._default_delegate = self._list_view.itemDelegate()
+
+        self._stack.addWidget(self._list_view)
+
+        # Default: list mode (tree view)
+        self._stack.setCurrentWidget(self._tree_view)
+
+    def _current_view(self) -> QAbstractItemView:
+        """Get the current active view."""
+        return self._stack.currentWidget()
 
     def set_root_path(self, path: Path):
         """Set the directory to display."""
         self._current_path = path
         self._model.setRootPath(str(path))
-        self.setRootIndex(self._model.index(str(path)))
 
-        # Reconnect selection changed signal (model change can disconnect it)
+        root_index = self._model.index(str(path))
+        self._tree_view.setRootIndex(root_index)
+        self._list_view.setRootIndex(root_index)
+
+        # Reconnect selection changed signals
+        self._connect_selection_signals()
+
+    def _connect_selection_signals(self):
+        """Connect selection changed signals for both views."""
+        # Tree view
         try:
-            self.selectionModel().selectionChanged.disconnect(self._on_selection_changed)
+            self._tree_view.selectionModel().selectionChanged.disconnect(self._on_selection_changed)
         except (RuntimeError, TypeError):
             pass
-        self.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        self._tree_view.selectionModel().selectionChanged.connect(self._on_selection_changed)
+
+        # List view
+        try:
+            self._list_view.selectionModel().selectionChanged.disconnect(self._on_selection_changed)
+        except (RuntimeError, TypeError):
+            pass
+        self._list_view.selectionModel().selectionChanged.connect(self._on_selection_changed)
 
     def set_view_mode(self, mode: str):
         """Change view mode (list, icons, thumbnails)."""
         self._view_mode = ViewMode(mode)
 
         if self._view_mode == ViewMode.LIST:
-            self.setViewMode(QListView.ViewMode.ListMode)
-            self.setGridSize(QSize())
-            self.setIconSize(QSize(16, 16))
-            self.setSpacing(0)
+            # Use tree view for detailed list with columns
+            self._stack.setCurrentWidget(self._tree_view)
+            self._tree_view.setIconSize(QSize(16, 16))
         elif self._view_mode == ViewMode.ICONS:
-            self.setViewMode(QListView.ViewMode.IconMode)
-            self.setGridSize(QSize(100, 80))
-            self.setIconSize(QSize(48, 48))
-            self.setSpacing(10)
-            self.setWordWrap(True)
+            # Use list view in icon mode
+            self._stack.setCurrentWidget(self._list_view)
+            self._list_view.setViewMode(QListView.ViewMode.IconMode)
+            self._list_view.setGridSize(QSize(100, 80))
+            self._list_view.setIconSize(QSize(48, 48))
+            self._list_view.setSpacing(10)
+            self._list_view.setWordWrap(True)
+            self._list_view.setItemDelegate(self._default_delegate)
         elif self._view_mode == ViewMode.THUMBNAILS:
-            self.setViewMode(QListView.ViewMode.IconMode)
-            self.setGridSize(QSize(150, 150))
-            self.setIconSize(QSize(128, 128))
-            self.setSpacing(10)
-            self.setWordWrap(True)
+            # Use list view in thumbnail mode
+            self._stack.setCurrentWidget(self._list_view)
+            self._list_view.setViewMode(QListView.ViewMode.IconMode)
+            self._list_view.setGridSize(QSize(150, 150))
+            self._list_view.setIconSize(QSize(128, 128))
+            self._list_view.setSpacing(10)
+            self._list_view.setWordWrap(True)
+            self._list_view.setItemDelegate(self._thumbnail_delegate)
 
     def _on_clicked(self, index: QModelIndex):
         """Handle single click - select and preview."""
@@ -113,10 +242,15 @@ class FileListView(QListView):
 
     def _on_selection_changed(self, selected, deselected):
         """Handle selection change (keyboard navigation)."""
-        indexes = self.selectedIndexes()
+        view = self._current_view()
+        indexes = view.selectionModel().selectedIndexes()
         if indexes:
-            path = Path(self._model.filePath(indexes[0]))
-            self.item_selected.emit(path)
+            # Get the first column index (name)
+            for idx in indexes:
+                if idx.column() == 0:
+                    path = Path(self._model.filePath(idx))
+                    self.item_selected.emit(path)
+                    break
 
     def _on_double_clicked(self, index: QModelIndex):
         """Handle double click - activate (open/navigate)."""
@@ -126,17 +260,30 @@ class FileListView(QListView):
     def get_selected_paths(self) -> list[Path]:
         """Get list of selected file paths."""
         paths = []
-        for index in self.selectedIndexes():
-            path = Path(self._model.filePath(index))
-            if path not in paths:
-                paths.append(path)
+        view = self._current_view()
+        for index in view.selectionModel().selectedIndexes():
+            if index.column() == 0:  # Only count name column
+                path = Path(self._model.filePath(index))
+                if path not in paths:
+                    paths.append(path)
         return paths
 
     def start_rename(self):
         """Start renaming selected item."""
-        indexes = self.selectedIndexes()
-        if indexes:
-            self.edit(indexes[0])
+        view = self._current_view()
+        indexes = view.selectionModel().selectedIndexes()
+        for idx in indexes:
+            if idx.column() == 0:
+                view.edit(idx)
+                break
+
+    def selectionModel(self):
+        """Get selection model of current view (for compatibility)."""
+        return self._current_view().selectionModel()
+
+    def selectedIndexes(self):
+        """Get selected indexes of current view (for compatibility)."""
+        return self._current_view().selectionModel().selectedIndexes()
 
     def _show_context_menu(self, pos: QPoint):
         """Show context menu with custom options."""
@@ -232,7 +379,8 @@ class FileListView(QListView):
             lambda: self._reveal_in_finder(selected_paths[0] if selected_paths else self._current_path)
         )
 
-        menu.exec(self.mapToGlobal(pos))
+        view = self._current_view()
+        menu.exec(view.mapToGlobal(pos))
 
     def _open_with_default(self, path: Path):
         """Open file with default application."""
@@ -340,17 +488,14 @@ class FileListView(QListView):
         """Open terminal at current path."""
         path = self._current_path
         if sys.platform == "darwin":
-            # macOS: open Terminal.app
             script = f'tell app "Terminal" to do script "cd {path}"'
             subprocess.run(["osascript", "-e", script])
         elif sys.platform == "win32":
-            # Windows: open PowerShell
             subprocess.Popen(
                 ["powershell", "-NoExit", "-Command", f"cd '{path}'"],
                 creationflags=subprocess.CREATE_NEW_CONSOLE,
             )
         else:
-            # Linux: try common terminals
             for term in ["gnome-terminal", "konsole", "xterm"]:
                 try:
                     subprocess.Popen([term, "--working-directory", str(path)])
@@ -369,7 +514,6 @@ class FileListView(QListView):
 
     def _copy_path(self, paths: list[Path]):
         """Copy file paths to clipboard."""
-        from PySide6.QtWidgets import QApplication
         clipboard = QApplication.clipboard()
         if len(paths) == 1:
             clipboard.setText(str(paths[0]))
@@ -392,22 +536,7 @@ class FileListView(QListView):
     def _populate_open_with_menu(self, menu: QMenu, path: Path):
         """Populate Open With submenu with available apps."""
         if sys.platform == "darwin":
-            # Get default apps for this file type
             try:
-                import plistlib
-                result = subprocess.run(
-                    ["mdls", "-name", "kMDItemContentType", "-raw", str(path)],
-                    capture_output=True, text=True
-                )
-                content_type = result.stdout.strip()
-
-                # Get apps that can open this type
-                result = subprocess.run(
-                    ["lsappinfo", "find", "canopen=" + str(path)],
-                    capture_output=True, text=True
-                )
-
-                # Add common apps as fallback
                 common_apps = [
                     ("TextEdit", "/System/Applications/TextEdit.app"),
                     ("Preview", "/System/Applications/Preview.app"),
@@ -449,66 +578,3 @@ class FileListView(QListView):
                 self.set_root_path(self._current_path)
             except OSError as e:
                 QMessageBox.warning(self, "Error", f"Cannot create file: {e}")
-
-    def dragEnterEvent(self, event):
-        """Handle drag enter."""
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragEnterEvent(event)
-
-    def dragMoveEvent(self, event):
-        """Handle drag move."""
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragMoveEvent(event)
-
-    def dropEvent(self, event):
-        """Handle drop."""
-        if event.mimeData().hasUrls():
-            urls = event.mimeData().urls()
-            paths = [Path(url.toLocalFile()) for url in urls]
-
-            # Determine drop target
-            index = self.indexAt(event.position().toPoint())
-            if index.isValid():
-                target = Path(self._model.filePath(index))
-                if target.is_dir():
-                    dest = target
-                else:
-                    dest = self._current_path
-            else:
-                dest = self._current_path
-
-            from commander.core.file_operations import FileOperations
-
-            ops = FileOperations()
-            if event.dropAction() == Qt.DropAction.MoveAction:
-                ops.move(paths, dest)
-            else:
-                ops.copy(paths, dest)
-
-            self.set_root_path(self._current_path)
-            event.acceptProposedAction()
-        else:
-            super().dropEvent(event)
-
-    def startDrag(self, supportedActions):
-        """Start drag operation."""
-        paths = self.get_selected_paths()
-        if not paths:
-            return
-
-        mime_data = QMimeData()
-        urls = [QUrl.fromLocalFile(str(p)) for p in paths]
-        mime_data.setUrls(urls)
-
-        drag = QDrag(self)
-        drag.setMimeData(mime_data)
-
-        index = self.selectedIndexes()[0]
-        icon = self._model.fileIcon(index)
-        drag.setPixmap(icon.pixmap(32, 32))
-
-        drag.exec(supportedActions)
