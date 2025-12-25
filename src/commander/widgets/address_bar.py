@@ -35,3 +35,8 @@ class AddressBar(QWidget):
         path = Path(self._path_edit.text())
         if path.exists() and path.is_dir():
             self.path_changed.emit(path)
+
+    def focus_and_select(self):
+        """Focus the path edit and select all text."""
+        self._path_edit.setFocus()
+        self._path_edit.selectAll()
