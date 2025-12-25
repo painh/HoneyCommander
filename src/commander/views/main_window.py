@@ -216,24 +216,27 @@ class MainWindow(QMainWindow):
     def _show_settings(self):
         """Show settings dialog."""
         from commander.widgets.settings_dialog import SettingsDialog
+
         dialog = SettingsDialog(self)
         dialog.exec()
 
     def _show_shortcuts(self):
         """Show keyboard shortcuts dialog."""
         from commander.widgets.shortcuts_dialog import ShortcutsDialog
+
         dialog = ShortcutsDialog(self)
         dialog.exec()
 
     def _show_about(self):
         """Show about dialog."""
         from PySide6.QtWidgets import QMessageBox
+
         QMessageBox.about(
             self,
             tr("about"),
             f"<h2>{tr('app_name')}</h2>"
             f"<p>{tr('about_description')}</p>"
-            f"<p>{tr('about_version')}: 1.0.0</p>"
+            f"<p>{tr('about_version')}: 1.0.0</p>",
         )
 
     def _setup_toolbar(self):
@@ -457,6 +460,7 @@ class MainWindow(QMainWindow):
                 subprocess.run(["open", str(path)])
             elif sys.platform == "win32":
                 import os
+
                 os.startfile(str(path))
             else:
                 subprocess.run(["xdg-open", str(path)])
@@ -467,19 +471,26 @@ class MainWindow(QMainWindow):
 
     def _is_image(self, path: Path) -> bool:
         """Check if path is an image file."""
-        image_extensions = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".ico", ".psd", ".psb"}
+        image_extensions = {
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".gif",
+            ".bmp",
+            ".webp",
+            ".tiff",
+            ".ico",
+            ".psd",
+            ".psb",
+        }
         return path.suffix.lower() in image_extensions
 
     def _open_image_viewer(self, path: Path):
         """Open fullscreen image viewer."""
-        from commander.views.fullscreen_viewer import FullscreenImageViewer
+        from commander.views.viewer import FullscreenImageViewer
 
         # Get list of images in current directory
-        images = [
-            p
-            for p in self._current_path.iterdir()
-            if p.is_file() and self._is_image(p)
-        ]
+        images = [p for p in self._current_path.iterdir() if p.is_file() and self._is_image(p)]
         images.sort()
 
         self._viewer = FullscreenImageViewer(self)
