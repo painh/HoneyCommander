@@ -20,8 +20,10 @@ from PySide6.QtWidgets import (
     QFileSystemModel,
     QAbstractItemView,
     QMenu,
+    QInputDialog,
+    QDialog,
 )
-from PySide6.QtGui import QAction, QKeySequence, QIcon
+from PySide6.QtGui import QAction, QKeySequence, QIcon, QShortcut
 
 from commander.views.folder_tree import FolderTreeView
 from commander.views.file_list import FileListView
@@ -180,7 +182,47 @@ class MainWindow(QMainWindow):
 
     def _setup_shortcuts(self):
         """Setup keyboard shortcuts."""
-        pass  # Already handled in menu actions
+        # Ctrl+L / Cmd+L: Focus address bar
+        focus_address_shortcut = QShortcut(QKeySequence("Ctrl+L"), self)
+        focus_address_shortcut.activated.connect(self._focus_address_bar)
+
+        # F3: Search files
+        search_shortcut = QShortcut(QKeySequence("F3"), self)
+        search_shortcut.activated.connect(self._show_search_dialog)
+
+        # F5: Refresh
+        refresh_shortcut = QShortcut(QKeySequence("F5"), self)
+        refresh_shortcut.activated.connect(self._refresh)
+
+        # Backspace: Go up
+        backspace_shortcut = QShortcut(QKeySequence("Backspace"), self)
+        backspace_shortcut.activated.connect(self._go_up)
+
+        # Alt+Left: Back
+        back_shortcut = QShortcut(QKeySequence("Alt+Left"), self)
+        back_shortcut.activated.connect(self._go_back)
+
+        # Alt+Right: Forward
+        forward_shortcut = QShortcut(QKeySequence("Alt+Right"), self)
+        forward_shortcut.activated.connect(self._go_forward)
+
+    def _focus_address_bar(self):
+        """Focus and select address bar text."""
+        self._address_bar.focus_and_select()
+
+    def _show_search_dialog(self):
+        """Show search dialog."""
+        from commander.widgets.search_dialog import SearchDialog
+
+        dialog = SearchDialog(self._current_path, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            result = dialog.get_selected_path()
+            if result:
+                if result.is_dir():
+                    self._navigate_to(result)
+                else:
+                    self._navigate_to(result.parent)
+                    # TODO: Select the file in list
 
     def _connect_signals(self):
         """Connect signals between components."""
