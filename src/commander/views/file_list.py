@@ -22,9 +22,89 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QHeaderView,
 )
-from PySide6.QtGui import QDrag, QAction, QCursor, QPainter, QPixmap, QIcon
+from PySide6.QtGui import QDrag, QAction, QCursor, QPainter, QPixmap, QIcon, QDragEnterEvent, QDropEvent
 
 from commander.core.thumbnail_provider import get_thumbnail_provider
+
+
+class DropEnabledTreeView(QTreeView):
+    """TreeView that handles external file drops."""
+
+    files_dropped = Signal(list, Path)  # dropped files, destination
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self._current_path: Path | None = None
+
+    def set_current_path(self, path: Path):
+        """Set current directory path for drops."""
+        self._current_path = path
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """Handle drag enter - accept file drops from external apps."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        """Handle drag move."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event: QDropEvent):
+        """Handle drop - copy/move files from external apps."""
+        if event.mimeData().hasUrls() and self._current_path:
+            urls = event.mimeData().urls()
+            paths = [Path(url.toLocalFile()) for url in urls if url.isLocalFile()]
+            if paths:
+                self.files_dropped.emit(paths, self._current_path)
+                event.acceptProposedAction()
+                return
+        super().dropEvent(event)
+
+
+class DropEnabledListView(QListView):
+    """ListView that handles external file drops."""
+
+    files_dropped = Signal(list, Path)  # dropped files, destination
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self._current_path: Path | None = None
+
+    def set_current_path(self, path: Path):
+        """Set current directory path for drops."""
+        self._current_path = path
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """Handle drag enter - accept file drops from external apps."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        """Handle drag move."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event: QDropEvent):
+        """Handle drop - copy/move files from external apps."""
+        if event.mimeData().hasUrls() and self._current_path:
+            urls = event.mimeData().urls()
+            paths = [Path(url.toLocalFile()) for url in urls if url.isLocalFile()]
+            if paths:
+                self.files_dropped.emit(paths, self._current_path)
+                event.acceptProposedAction()
+                return
+        super().dropEvent(event)
 
 
 class ViewMode(Enum):
@@ -127,11 +207,10 @@ class FileListView(QWidget):
         layout.addWidget(self._stack)
 
         # Tree view for list mode (with columns)
-        self._tree_view = QTreeView()
+        self._tree_view = DropEnabledTreeView()
         self._tree_view.setModel(self._model)
         self._tree_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._tree_view.setDragEnabled(True)
-        self._tree_view.setAcceptDrops(True)
         self._tree_view.setDropIndicatorShown(True)
         self._tree_view.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self._tree_view.setDefaultDropAction(Qt.DropAction.MoveAction)
@@ -142,6 +221,7 @@ class FileListView(QWidget):
         self._tree_view.setRootIsDecorated(False)  # Don't show expand arrows
         self._tree_view.setSortingEnabled(True)
         self._tree_view.sortByColumn(0, Qt.SortOrder.AscendingOrder)
+        self._tree_view.files_dropped.connect(self._on_files_dropped)
 
         # Configure header
         header = self._tree_view.header()
@@ -154,11 +234,10 @@ class FileListView(QWidget):
         self._stack.addWidget(self._tree_view)
 
         # List view for icons/thumbnails mode
-        self._list_view = QListView()
+        self._list_view = DropEnabledListView()
         self._list_view.setModel(self._model)
         self._list_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._list_view.setDragEnabled(True)
-        self._list_view.setAcceptDrops(True)
         self._list_view.setDropIndicatorShown(True)
         self._list_view.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self._list_view.setDefaultDropAction(Qt.DropAction.MoveAction)
@@ -166,6 +245,7 @@ class FileListView(QWidget):
         self._list_view.customContextMenuRequested.connect(self._show_context_menu)
         self._list_view.clicked.connect(self._on_clicked)
         self._list_view.doubleClicked.connect(self._on_double_clicked)
+        self._list_view.files_dropped.connect(self._on_files_dropped)
 
         # Thumbnail delegate
         self._thumbnail_delegate = ThumbnailDelegate(self._list_view)
@@ -188,6 +268,10 @@ class FileListView(QWidget):
         root_index = self._model.index(str(path))
         self._tree_view.setRootIndex(root_index)
         self._list_view.setRootIndex(root_index)
+
+        # Update drop target path
+        self._tree_view.set_current_path(path)
+        self._list_view.set_current_path(path)
 
         # Reconnect selection changed signals
         self._connect_selection_signals()
@@ -578,3 +662,37 @@ class FileListView(QWidget):
                 self.set_root_path(self._current_path)
             except OSError as e:
                 QMessageBox.warning(self, "Error", f"Cannot create file: {e}")
+
+    def _on_files_dropped(self, paths: list[Path], destination: Path):
+        """Handle files dropped from external app (e.g., Finder)."""
+        from commander.core.file_operations import FileOperations
+        from commander.widgets.progress_dialog import ProgressDialog
+
+        # Filter out files that are already in the destination
+        paths_to_copy = [p for p in paths if p.parent != destination]
+        if not paths_to_copy:
+            return
+
+        # Ask user: Copy or Move?
+        reply = QMessageBox.question(
+            self,
+            "Drop Files",
+            f"Copy {len(paths_to_copy)} item(s) to this folder?\n\n"
+            f"Click 'Yes' to copy, 'No' to move.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+        )
+
+        if reply == QMessageBox.StandardButton.Cancel:
+            return
+
+        ops = FileOperations()
+        if reply == QMessageBox.StandardButton.Yes:
+            # Copy
+            dialog = ProgressDialog("copy", paths_to_copy, destination, self)
+            dialog.exec()
+        else:
+            # Move
+            dialog = ProgressDialog("move", paths_to_copy, destination, self)
+            dialog.exec()
+
+        self.set_root_path(self._current_path)

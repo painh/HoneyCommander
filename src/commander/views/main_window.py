@@ -53,7 +53,7 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._load_settings()
 
-        self.setWindowTitle("Commander")
+        self.setWindowTitle("꿀 커맨더")
 
     def _setup_ui(self):
         """Setup the main UI layout."""
