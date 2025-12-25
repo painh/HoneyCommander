@@ -4,7 +4,7 @@ import sys
 import subprocess
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QSize, QPoint
+from PySide6.QtCore import Qt, Signal, QSize, QPoint, QThread, QObject
 from PySide6.QtWidgets import (
     QWidget,
     QLabel,
@@ -28,6 +28,55 @@ from PySide6.QtGui import (
 )
 
 from commander.core.image_loader import load_pixmap
+
+
+class ThumbnailWorker(QObject):
+    """Worker to generate frame thumbnails in background."""
+
+    thumbnail_ready = Signal(int, QPixmap)  # frame_index, pixmap
+    finished = Signal()
+
+    def __init__(self, path: Path, frame_count: int, thumb_size: int = 70):
+        super().__init__()
+        self._path = path
+        self._frame_count = frame_count
+        self._thumb_size = thumb_size
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        """Generate thumbnails for all frames."""
+        try:
+            from PIL import Image
+            from io import BytesIO
+
+            with Image.open(self._path) as img:
+                for i in range(self._frame_count):
+                    if self._cancelled:
+                        break
+
+                    img.seek(i)
+                    frame = img.copy()
+                    frame.thumbnail((self._thumb_size, self._thumb_size))
+
+                    if frame.mode != "RGBA":
+                        frame = frame.convert("RGBA")
+
+                    buffer = BytesIO()
+                    frame.save(buffer, format="PNG")
+                    buffer.seek(0)
+
+                    pixmap = QPixmap()
+                    pixmap.loadFromData(buffer.getvalue())
+
+                    if not self._cancelled:
+                        self.thumbnail_ready.emit(i, pixmap)
+        except Exception as e:
+            print(f"Error generating thumbnails: {e}")
+        finally:
+            self.finished.emit()
 
 
 class FullscreenImageViewer(QWidget):
@@ -67,6 +116,8 @@ class FullscreenImageViewer(QWidget):
         self._frame_count: int = 0
         self._current_frame: int = 0
         self._frame_thumbnails: list[QPixmap] = []
+        self._thumbnail_thread: QThread | None = None
+        self._thumbnail_worker: ThumbnailWorker | None = None
 
         self._setup_ui()
 
@@ -230,10 +281,7 @@ class FullscreenImageViewer(QWidget):
         # Connect frame changed signal
         self._movie.frameChanged.connect(self._on_frame_changed)
 
-        # Generate frame thumbnails
-        self._generate_frame_thumbnails(path)
-
-        # Setup display
+        # Setup display first (fast), then generate thumbnails in background
         self._movie.jumpToFrame(0)
         self._current_frame = 0
 
@@ -252,10 +300,16 @@ class FullscreenImageViewer(QWidget):
         self._update_frame_info()
         self._update_info()
 
+        # Generate thumbnails in background
+        self._start_thumbnail_generation(path)
+
         return True
 
-    def _generate_frame_thumbnails(self, path: Path):
-        """Generate thumbnails for all frames."""
+    def _start_thumbnail_generation(self, path: Path):
+        """Start generating thumbnails in background thread."""
+        # Cancel any existing thumbnail generation
+        self._stop_thumbnail_generation()
+
         # Clear existing thumbnails
         self._frame_thumbnails.clear()
         while self._frame_container_layout.count():
@@ -263,43 +317,54 @@ class FullscreenImageViewer(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
-        try:
-            from PIL import Image
+        # Create placeholder labels for all frames
+        thumb_size = 70
+        for i in range(self._frame_count):
+            thumb_label = QLabel()
+            thumb_label.setFixedSize(thumb_size, thumb_size)
+            thumb_label.setStyleSheet("border: 2px solid transparent; background: #333;")
+            thumb_label.setCursor(Qt.CursorShape.PointingHandCursor)
+            thumb_label.setProperty("frame_index", i)
+            thumb_label.mousePressEvent = lambda e, idx=i: self._jump_to_frame(idx)
+            self._frame_container_layout.addWidget(thumb_label)
 
-            thumb_size = 70
-            with Image.open(path) as img:
-                for i in range(self._frame_count):
-                    img.seek(i)
-                    # Convert frame to thumbnail
-                    frame = img.copy()
-                    frame.thumbnail((thumb_size, thumb_size))
+        # Start background worker
+        self._thumbnail_thread = QThread()
+        self._thumbnail_worker = ThumbnailWorker(path, self._frame_count, thumb_size)
+        self._thumbnail_worker.moveToThread(self._thumbnail_thread)
 
-                    # Convert PIL to QPixmap
-                    if frame.mode != "RGBA":
-                        frame = frame.convert("RGBA")
+        self._thumbnail_thread.started.connect(self._thumbnail_worker.run)
+        self._thumbnail_worker.thumbnail_ready.connect(self._on_thumbnail_ready)
+        self._thumbnail_worker.finished.connect(self._on_thumbnails_finished)
 
-                    from io import BytesIO
+        self._thumbnail_thread.start()
 
-                    buffer = BytesIO()
-                    frame.save(buffer, format="PNG")
-                    buffer.seek(0)
+    def _on_thumbnail_ready(self, frame_index: int, pixmap: QPixmap):
+        """Handle thumbnail ready from background thread."""
+        self._frame_thumbnails.append(pixmap)
 
-                    pixmap = QPixmap()
-                    pixmap.loadFromData(buffer.getvalue())
-                    self._frame_thumbnails.append(pixmap)
+        # Update the placeholder label
+        if frame_index < self._frame_container_layout.count():
+            item = self._frame_container_layout.itemAt(frame_index)
+            if item and item.widget():
+                item.widget().setPixmap(pixmap)
+                # Highlight if current frame
+                if frame_index == self._current_frame:
+                    item.widget().setStyleSheet("border: 2px solid #0078d4; background: #333;")
 
-                    # Create thumbnail label
-                    thumb_label = QLabel()
-                    thumb_label.setPixmap(pixmap)
-                    thumb_label.setFixedSize(thumb_size, thumb_size)
-                    thumb_label.setStyleSheet("border: 2px solid transparent; background: #333;")
-                    thumb_label.setCursor(Qt.CursorShape.PointingHandCursor)
-                    thumb_label.setProperty("frame_index", i)
-                    thumb_label.mousePressEvent = lambda e, idx=i: self._jump_to_frame(idx)
-                    self._frame_container_layout.addWidget(thumb_label)
+    def _on_thumbnails_finished(self):
+        """Handle thumbnail generation finished."""
+        self._stop_thumbnail_generation()
 
-        except Exception as e:
-            print(f"Error generating thumbnails: {e}")
+    def _stop_thumbnail_generation(self):
+        """Stop background thumbnail generation."""
+        if self._thumbnail_worker:
+            self._thumbnail_worker.cancel()
+        if self._thumbnail_thread and self._thumbnail_thread.isRunning():
+            self._thumbnail_thread.quit()
+            self._thumbnail_thread.wait(1000)
+        self._thumbnail_thread = None
+        self._thumbnail_worker = None
 
     def _on_frame_changed(self, frame_number: int):
         """Handle frame change in animation."""
@@ -349,22 +414,44 @@ class FullscreenImageViewer(QWidget):
                 self._movie.setPaused(True)
                 self._play_button.setText("▶")
             else:
-                self._movie.setPaused(False)
+                # Use start() instead of setPaused(False) for reliability
+                self._movie.start()
                 self._play_button.setText("⏸")
 
     def _jump_to_frame(self, frame_index: int):
         """Jump to specific frame."""
         if self._movie:
             was_running = self._movie.state() == QMovie.MovieState.Running
-            self._movie.setPaused(True)
+            self._movie.stop()
             self._movie.jumpToFrame(frame_index)
             self._current_frame = frame_index
-            self._on_frame_changed(frame_index)
+
+            # Manually update display since frameChanged won't fire when stopped
+            pixmap = self._movie.currentPixmap()
+            if not pixmap.isNull():
+                new_size = QSize(
+                    int(pixmap.width() * self._zoom_level),
+                    int(pixmap.height() * self._zoom_level),
+                )
+                scaled = pixmap.scaled(
+                    new_size,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                    if self._smooth_filter
+                    else Qt.TransformationMode.FastTransformation,
+                )
+                self._image_label.setPixmap(scaled)
+                self._image_label.resize(scaled.size())
+
+            self._update_frame_info()
+            self._highlight_current_frame()
+
             if was_running:
-                self._movie.setPaused(False)
+                self._movie.start()
 
     def _stop_animation(self):
         """Stop and cleanup animation."""
+        self._stop_thumbnail_generation()
         if self._movie:
             self._movie.stop()
             self._movie.frameChanged.disconnect(self._on_frame_changed)
