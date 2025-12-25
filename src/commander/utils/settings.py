@@ -72,10 +72,47 @@ class Settings:
 
     def load_favorites(self) -> list[Path]:
         """Load favorite folders."""
-        paths = self._settings.value("favorites/paths", [])
+        paths = self._settings.value("favorites/paths")
+
+        # First time: initialize with default favorites
+        if paths is None:
+            defaults = self._get_default_favorites()
+            self.save_favorites(defaults)
+            return defaults
+
         if paths:
             return [Path(p) for p in paths if Path(p).exists()]
         return []
+
+    def _get_default_favorites(self) -> list[Path]:
+        """Get default favorite folders."""
+        import sys
+        defaults = []
+
+        home = Path.home()
+        if home.exists():
+            defaults.append(home)
+
+        # Common folders
+        common_folders = [
+            home / "Downloads",
+            home / "Documents",
+            home / "Desktop",
+        ]
+
+        # macOS specific
+        if sys.platform == "darwin":
+            common_folders.append(Path("/Applications"))
+
+        # Windows specific
+        if sys.platform == "win32":
+            common_folders.append(Path("C:/"))
+
+        for folder in common_folders:
+            if folder.exists():
+                defaults.append(folder)
+
+        return defaults
 
     def add_favorite(self, path: Path):
         """Add a folder to favorites."""
