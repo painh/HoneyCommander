@@ -79,6 +79,9 @@
 
   "select_file_to_preview": "プレビューするファイルを選択",
   "cannot_load_image": "画像を読み込めません",
+  "filter": "フィルタ",
+  "filter_crispy": "シャープ",
+  "filter_smooth": "スムース",
 
   "favorites": "お気に入り",
   "add_to_favorites": "お気に入りに追加",
@@ -90,6 +93,17 @@
   "error_creating_folder": "フォルダ作成エラー: {name}",
 
   "settings": "設定",
+  "settings_general": "一般",
+  "settings_view": "表示",
+  "settings_search": "検索",
+  "settings_performance": "パフォーマンス",
+  "settings_thumbnails": "サムネイル",
+  "settings_thumbnail_size": "サムネイルサイズ:",
+  "settings_anim_thumb_size": "アニメーションフレームサイズ:",
+  "settings_fuzzy_timeout": "ファジー検索タイムアウト:",
+  "settings_max_results": "最大検索結果数:",
+  "settings_cache_size": "サムネイルキャッシュ数:",
+  "settings_undo_stack": "元に戻すスタックサイズ:",
 
   "shortcuts": "キーボードショートカット",
   "about": "情報",

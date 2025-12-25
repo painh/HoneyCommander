@@ -87,6 +87,7 @@ class Settings:
     def _get_default_favorites(self) -> list[Path]:
         """Get default favorite folders."""
         import sys
+
         defaults = []
 
         home = Path.home()
@@ -149,3 +150,57 @@ class Settings:
     def load_language(self) -> str | None:
         """Load language setting. Returns None if not set (use system default)."""
         return self._settings.value("general/language")
+
+    # Fuzzy search timeout (in milliseconds)
+    def save_fuzzy_search_timeout(self, timeout_ms: int):
+        """Save fuzzy search timeout."""
+        self._settings.setValue("search/fuzzy_timeout_ms", timeout_ms)
+
+    def load_fuzzy_search_timeout(self) -> int:
+        """Load fuzzy search timeout. Default 1500ms."""
+        return self._settings.value("search/fuzzy_timeout_ms", 1500, type=int)
+
+    # Thumbnail cache size
+    def save_thumbnail_cache_size(self, size: int):
+        """Save thumbnail cache size."""
+        self._settings.setValue("performance/thumbnail_cache_size", size)
+
+    def load_thumbnail_cache_size(self) -> int:
+        """Load thumbnail cache size. Default 500."""
+        return self._settings.value("performance/thumbnail_cache_size", 500, type=int)
+
+    # Thumbnail size
+    def save_thumbnail_size(self, size: int):
+        """Save thumbnail size."""
+        self._settings.setValue("view/thumbnail_size", size)
+
+    def load_thumbnail_size(self) -> int:
+        """Load thumbnail size. Default 128."""
+        return self._settings.value("view/thumbnail_size", 128, type=int)
+
+    # Undo stack size
+    def save_undo_stack_size(self, size: int):
+        """Save undo stack size."""
+        self._settings.setValue("performance/undo_stack_size", size)
+
+    def load_undo_stack_size(self) -> int:
+        """Load undo stack size. Default 50."""
+        return self._settings.value("performance/undo_stack_size", 50, type=int)
+
+    # Animation frame thumbnail size
+    def save_animation_thumb_size(self, size: int):
+        """Save animation frame thumbnail size."""
+        self._settings.setValue("view/animation_thumb_size", size)
+
+    def load_animation_thumb_size(self) -> int:
+        """Load animation frame thumbnail size. Default 70."""
+        return self._settings.value("view/animation_thumb_size", 70, type=int)
+
+    # Search max results
+    def save_search_max_results(self, count: int):
+        """Save search max results."""
+        self._settings.setValue("search/max_results", count)
+
+    def load_search_max_results(self) -> int:
+        """Load search max results. Default 100."""
+        return self._settings.value("search/max_results", 100, type=int)

@@ -79,6 +79,9 @@
 
   "select_file_to_preview": "选择要预览的文件",
   "cannot_load_image": "无法加载图片",
+  "filter": "滤镜",
+  "filter_crispy": "锐利",
+  "filter_smooth": "平滑",
 
   "favorites": "收藏夹",
   "add_to_favorites": "添加到收藏夹",
@@ -90,6 +93,17 @@
   "error_creating_folder": "创建文件夹出错: {name}",
 
   "settings": "设置",
+  "settings_general": "通用",
+  "settings_view": "显示",
+  "settings_search": "搜索",
+  "settings_performance": "性能",
+  "settings_thumbnails": "缩略图",
+  "settings_thumbnail_size": "缩略图大小:",
+  "settings_anim_thumb_size": "动画帧大小:",
+  "settings_fuzzy_timeout": "模糊搜索超时:",
+  "settings_max_results": "最大搜索结果数:",
+  "settings_cache_size": "缩略图缓存数:",
+  "settings_undo_stack": "撤销堆栈大小:",
 
   "shortcuts": "键盘快捷键",
   "about": "关于",

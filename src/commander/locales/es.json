@@ -79,6 +79,9 @@
 
   "select_file_to_preview": "Seleccione un archivo para vista previa",
   "cannot_load_image": "No se puede cargar la imagen",
+  "filter": "Filtro",
+  "filter_crispy": "Nítido",
+  "filter_smooth": "Suave",
 
   "favorites": "Favoritos",
   "add_to_favorites": "Agregar a favoritos",
@@ -90,6 +93,17 @@
   "error_creating_folder": "Error al crear carpeta: {name}",
 
   "settings": "Configuración",
+  "settings_general": "General",
+  "settings_view": "Ver",
+  "settings_search": "Buscar",
+  "settings_performance": "Rendimiento",
+  "settings_thumbnails": "Miniaturas",
+  "settings_thumbnail_size": "Tamaño de miniatura:",
+  "settings_anim_thumb_size": "Tamaño de cuadro de animación:",
+  "settings_fuzzy_timeout": "Tiempo de búsqueda difusa:",
+  "settings_max_results": "Máx. resultados de búsqueda:",
+  "settings_cache_size": "Tamaño de caché de miniaturas:",
+  "settings_undo_stack": "Tamaño de pila de deshacer:",
 
   "shortcuts": "Atajos de teclado",
   "about": "Acerca de",

@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, QThread, Signal, QSize, QObject
 from PySide6.QtGui import QPixmap, QImage
 
 from commander.core.image_loader import load_pixmap, ALL_IMAGE_FORMATS
+from commander.utils.settings import Settings
 
 
 class ThumbnailWorker(QThread):
@@ -44,10 +45,12 @@ class ThumbnailProvider(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._settings = Settings()
         self._cache: dict[str, QPixmap] = {}
         self._pending: dict[str, ThumbnailWorker] = {}
-        self._max_cache_size = 500  # Max cached thumbnails
-        self._thumbnail_size = QSize(128, 128)
+        self._max_cache_size = self._settings.load_thumbnail_cache_size()
+        size = self._settings.load_thumbnail_size()
+        self._thumbnail_size = QSize(size, size)
 
     def set_thumbnail_size(self, size: QSize):
         """Set thumbnail size and clear cache if size changed."""

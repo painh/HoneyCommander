@@ -11,9 +11,12 @@ import send2trash
 
 from PySide6.QtCore import QObject, Signal
 
+from commander.utils.settings import Settings
+
 
 class ActionType(Enum):
     """Types of undoable actions."""
+
     COPY = auto()
     MOVE = auto()
     DELETE = auto()
@@ -24,6 +27,7 @@ class ActionType(Enum):
 @dataclass
 class UndoableAction:
     """Represents an undoable file operation."""
+
     action_type: ActionType
     # For COPY/MOVE: source paths that were copied/moved
     # For DELETE: paths that were deleted
@@ -62,9 +66,10 @@ class UndoManager(QObject):
         if self._initialized:
             return
         super().__init__()
+        self._settings = Settings()
         self._undo_stack: list[UndoableAction] = []
         self._redo_stack: list[UndoableAction] = []
-        self._max_stack_size = 50
+        self._max_stack_size = self._settings.load_undo_stack_size()
         self._initialized = True
 
     def record_copy(self, sources: list[Path], destinations: list[Path]):
@@ -73,7 +78,7 @@ class UndoManager(QObject):
             action_type=ActionType.COPY,
             source_paths=sources.copy(),
             dest_paths=destinations.copy(),
-            description=f"Copy {len(sources)} item(s)"
+            description=f"Copy {len(sources)} item(s)",
         )
         self._push_action(action)
 
@@ -83,7 +88,7 @@ class UndoManager(QObject):
             action_type=ActionType.MOVE,
             source_paths=sources.copy(),
             dest_paths=destinations.copy(),
-            description=f"Move {len(sources)} item(s)"
+            description=f"Move {len(sources)} item(s)",
         )
         self._push_action(action)
 
@@ -92,7 +97,7 @@ class UndoManager(QObject):
         action = UndoableAction(
             action_type=ActionType.DELETE,
             source_paths=paths.copy(),
-            description=f"Delete {len(paths)} item(s)"
+            description=f"Delete {len(paths)} item(s)",
         )
         self._push_action(action)
 
@@ -102,7 +107,7 @@ class UndoManager(QObject):
             action_type=ActionType.RENAME,
             source_paths=[old_path],
             dest_paths=[new_path],
-            description=f"Rename {old_path.name} → {new_path.name}"
+            description=f"Rename {old_path.name} → {new_path.name}",
         )
         self._push_action(action)
 
@@ -111,7 +116,7 @@ class UndoManager(QObject):
         action = UndoableAction(
             action_type=ActionType.CREATE_FOLDER,
             source_paths=[path],
-            description=f"Create folder {path.name}"
+            description=f"Create folder {path.name}",
         )
         self._push_action(action)
 
