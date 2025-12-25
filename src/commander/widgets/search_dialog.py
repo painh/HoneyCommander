@@ -1,5 +1,6 @@
 """File search dialog."""
 
+import fnmatch
 from pathlib import Path
 from typing import Generator
 
@@ -14,13 +15,18 @@ from PySide6.QtWidgets import (
     QPushButton,
     QLabel,
     QCheckBox,
+    QSplitter,
+    QWidget,
 )
+
+from commander.views.preview_panel import PreviewPanel
 
 
 class SearchWorker(QThread):
     """Background worker for file search."""
 
-    result_found = Signal(Path)
+    # Use str instead of Path for cross-thread signal safety
+    result_found = Signal(str)
     search_finished = Signal()
 
     def __init__(self, root_path: Path, pattern: str, recursive: bool = True):
@@ -29,6 +35,8 @@ class SearchWorker(QThread):
         self._pattern = pattern.lower()
         self._recursive = recursive
         self._stopped = False
+        # Check if pattern uses wildcards
+        self._use_glob = "*" in pattern or "?" in pattern
 
     def run(self):
         """Run the search."""
@@ -37,10 +45,20 @@ class SearchWorker(QThread):
                 self._search_recursive(self._root_path)
             else:
                 self._search_flat(self._root_path)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Search error: {e}")
         finally:
             self.search_finished.emit()
+
+    def _matches(self, name: str) -> bool:
+        """Check if name matches the pattern."""
+        name_lower = name.lower()
+        if self._use_glob:
+            # Use fnmatch for wildcard patterns
+            return fnmatch.fnmatch(name_lower, self._pattern)
+        else:
+            # Simple substring match
+            return self._pattern in name_lower
 
     def _search_recursive(self, path: Path):
         """Search recursively."""
@@ -52,12 +70,12 @@ class SearchWorker(QThread):
                 if self._stopped:
                     return
 
-                if self._pattern in item.name.lower():
-                    self.result_found.emit(item)
+                if self._matches(item.name):
+                    self.result_found.emit(str(item))
 
                 if item.is_dir():
                     self._search_recursive(item)
-        except PermissionError:
+        except (PermissionError, OSError):
             pass
 
     def _search_flat(self, path: Path):
@@ -67,9 +85,9 @@ class SearchWorker(QThread):
                 if self._stopped:
                     return
 
-                if self._pattern in item.name.lower():
-                    self.result_found.emit(item)
-        except PermissionError:
+                if self._matches(item.name):
+                    self.result_found.emit(str(item))
+        except (PermissionError, OSError):
             pass
 
     def stop(self):
@@ -88,22 +106,33 @@ class SearchDialog(QDialog):
 
         self._setup_ui()
         self.setWindowTitle("Search Files (F3)")
-        self.resize(500, 400)
+        self.resize(800, 500)
 
     def _setup_ui(self):
         """Setup UI."""
         layout = QVBoxLayout(self)
 
+        # Search path label
+        path_label = QLabel(f"검색 위치: {self._root_path}")
+        path_label.setStyleSheet("color: #888; font-size: 11px;")
+        path_label.setWordWrap(True)
+        layout.addWidget(path_label)
+
         # Search input
         search_layout = QHBoxLayout()
 
         self._search_input = QLineEdit()
-        self._search_input.setPlaceholderText("Enter filename to search...")
+        self._search_input.setPlaceholderText("검색어 입력 (예: *.png, test*.txt, photo??.jpg)")
         self._search_input.textChanged.connect(self._on_search_text_changed)
         self._search_input.returnPressed.connect(self._select_first_result)
         search_layout.addWidget(self._search_input)
 
         layout.addLayout(search_layout)
+
+        # Help text
+        help_label = QLabel("* = 여러 문자, ? = 한 문자 (예: *.jpg, test*.png, img??.gif)")
+        help_label.setStyleSheet("color: gray; font-size: 11px;")
+        layout.addWidget(help_label)
 
         # Options
         options_layout = QHBoxLayout()
@@ -117,10 +146,24 @@ class SearchDialog(QDialog):
 
         layout.addLayout(options_layout)
 
-        # Results list
+        # Splitter: Results list + Preview panel
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left: Results list
         self._results_list = QListWidget()
         self._results_list.itemDoubleClicked.connect(self._on_item_double_clicked)
-        layout.addWidget(self._results_list, stretch=1)
+        self._results_list.itemClicked.connect(self._on_item_clicked)
+        self._results_list.currentItemChanged.connect(self._on_current_item_changed)
+        splitter.addWidget(self._results_list)
+
+        # Right: Preview panel
+        self._preview_panel = PreviewPanel()
+        splitter.addWidget(self._preview_panel)
+
+        # Set splitter sizes (2:1 ratio)
+        splitter.setSizes([500, 250])
+
+        layout.addWidget(splitter, stretch=1)
 
         # Buttons
         button_layout = QHBoxLayout()
@@ -163,14 +206,20 @@ class SearchDialog(QDialog):
         self._worker.search_finished.connect(self._on_search_finished)
         self._worker.start()
 
-    def _on_result_found(self, path: Path):
+    def _on_result_found(self, path_str: str):
         """Handle search result."""
         # Limit results
         if self._results_list.count() >= 100:
             return
 
+        path = Path(path_str)
         item = QListWidgetItem()
-        item.setText(str(path.relative_to(self._root_path)))
+
+        try:
+            item.setText(str(path.relative_to(self._root_path)))
+        except ValueError:
+            item.setText(path_str)
+
         item.setData(Qt.ItemDataRole.UserRole, path)
 
         # Set icon
@@ -193,6 +242,19 @@ class SearchDialog(QDialog):
             self._status_label.setText(f"Found 100+ results (showing first 100)")
         else:
             self._status_label.setText(f"Found {count} result(s)")
+
+    def _on_item_clicked(self, item: QListWidgetItem):
+        """Handle click on result - show preview."""
+        path = item.data(Qt.ItemDataRole.UserRole)
+        if path:
+            self._preview_panel.show_preview(path)
+
+    def _on_current_item_changed(self, current: QListWidgetItem, previous: QListWidgetItem):
+        """Handle current item change (keyboard navigation) - show preview."""
+        if current:
+            path = current.data(Qt.ItemDataRole.UserRole)
+            if path:
+                self._preview_panel.show_preview(path)
 
     def _on_item_double_clicked(self, item: QListWidgetItem):
         """Handle double click on result."""

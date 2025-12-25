@@ -11,13 +11,15 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
 )
-from PySide6.QtGui import QPixmap, QImage
+from PySide6.QtGui import QPixmap
+
+from commander.core.image_loader import load_pixmap, ALL_IMAGE_FORMATS
 
 
 class PreviewPanel(QWidget):
     """Right panel for file preview."""
 
-    SUPPORTED_IMAGES = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".ico"}
+    SUPPORTED_IMAGES = ALL_IMAGE_FORMATS
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -77,7 +79,7 @@ class PreviewPanel(QWidget):
     def _show_image_preview(self, path: Path):
         """Show image preview."""
         try:
-            pixmap = QPixmap(str(path))
+            pixmap = load_pixmap(path)
             if not pixmap.isNull():
                 # Scale to fit while maintaining aspect ratio
                 scaled = pixmap.scaled(

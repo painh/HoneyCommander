@@ -31,6 +31,7 @@ from commander.views.preview_panel import PreviewPanel
 from commander.widgets.address_bar import AddressBar
 from commander.widgets.favorites_panel import FavoritesPanel
 from commander.core.file_operations import FileOperations
+from commander.core.undo_manager import get_undo_manager
 from commander.utils.settings import Settings
 
 
@@ -123,6 +124,21 @@ class MainWindow(QMainWindow):
 
         # Edit menu
         edit_menu = menubar.addMenu("Edit")
+
+        # Undo/Redo
+        self._undo_action = QAction("Undo", self)
+        self._undo_action.setShortcut(QKeySequence.StandardKey.Undo)
+        self._undo_action.triggered.connect(self._undo)
+        self._undo_action.setEnabled(False)
+        edit_menu.addAction(self._undo_action)
+
+        self._redo_action = QAction("Redo", self)
+        self._redo_action.setShortcut(QKeySequence.StandardKey.Redo)
+        self._redo_action.triggered.connect(self._redo)
+        self._redo_action.setEnabled(False)
+        edit_menu.addAction(self._redo_action)
+
+        edit_menu.addSeparator()
 
         self._copy_action = QAction("Copy", self)
         self._copy_action.setShortcut(QKeySequence.StandardKey.Copy)
@@ -258,9 +274,38 @@ class MainWindow(QMainWindow):
         # Address bar favorite toggle -> refresh favorites panel
         self._address_bar.favorite_toggled.connect(self._on_favorite_toggled)
 
+        # Undo manager signals
+        undo_mgr = get_undo_manager()
+        undo_mgr.undo_available.connect(self._on_undo_available)
+        undo_mgr.redo_available.connect(self._on_redo_available)
+        undo_mgr.action_performed.connect(self._on_undo_action_performed)
+
     def _on_favorite_toggled(self, path: Path, is_favorite: bool):
         """Handle favorite toggle."""
         self._favorites_panel.refresh()
+
+    def _on_undo_available(self, available: bool):
+        """Update undo action state."""
+        self._undo_action.setEnabled(available)
+        if available:
+            desc = get_undo_manager().get_undo_description()
+            self._undo_action.setText(f"Undo {desc}")
+        else:
+            self._undo_action.setText("Undo")
+
+    def _on_redo_available(self, available: bool):
+        """Update redo action state."""
+        self._redo_action.setEnabled(available)
+        if available:
+            desc = get_undo_manager().get_redo_description()
+            self._redo_action.setText(f"Redo {desc}")
+        else:
+            self._redo_action.setText("Redo")
+
+    def _on_undo_action_performed(self, message: str):
+        """Show undo/redo result in status bar."""
+        self._status_bar.showMessage(message)
+        self._refresh()
 
     def _load_settings(self):
         """Load saved settings."""
@@ -276,10 +321,10 @@ class MainWindow(QMainWindow):
         if sizes:
             self._splitter.setSizes(sizes)
 
-        # Last path
+        # Last path - navigate to it (this also updates _current_path)
         last_path = self._settings.load_last_path()
-        if last_path:
-            self._current_path = last_path
+        if last_path and last_path.exists():
+            self._navigate_to(last_path)
 
         # View mode
         view_mode = self._settings.load_view_mode()
@@ -337,7 +382,7 @@ class MainWindow(QMainWindow):
 
     def _is_image(self, path: Path) -> bool:
         """Check if path is an image file."""
-        image_extensions = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".ico"}
+        image_extensions = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".ico", ".psd", ".psb"}
         return path.suffix.lower() in image_extensions
 
     def _open_image_viewer(self, path: Path):
@@ -456,16 +501,23 @@ class MainWindow(QMainWindow):
         """Rename selected item."""
         self._file_list.start_rename()
 
+    def _undo(self):
+        """Undo last file operation."""
+        get_undo_manager().undo()
+
+    def _redo(self):
+        """Redo last undone operation."""
+        get_undo_manager().redo()
+
     def _create_new_folder(self):
         """Create a new folder."""
         from PySide6.QtWidgets import QInputDialog
 
         name, ok = QInputDialog.getText(self, "New Folder", "Folder name:")
         if ok and name:
-            new_path = self._current_path / name
-            try:
-                new_path.mkdir()
+            result = self._file_ops.create_folder(self._current_path, name)
+            if result:
                 self._refresh()
                 self._status_bar.showMessage(f"Created folder: {name}")
-            except OSError as e:
-                self._status_bar.showMessage(f"Error: {e}")
+            else:
+                self._status_bar.showMessage(f"Error creating folder: {name}")

@@ -6,12 +6,14 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal, QSize, QPoint
 from PySide6.QtWidgets import (
-    QWidget, QLabel, QVBoxLayout, QApplication, QMenu,
-    QMessageBox, QInputDialog, QScrollArea, QFileDialog,
+    QWidget, QLabel, QVBoxLayout, QHBoxLayout, QApplication, QMenu,
+    QMessageBox, QInputDialog, QFileDialog, QScrollArea,
 )
 from PySide6.QtGui import (
     QPixmap, QKeyEvent, QWheelEvent, QTransform, QCursor,
 )
+
+from commander.core.image_loader import load_pixmap
 
 
 class FullscreenImageViewer(QWidget):
@@ -37,10 +39,12 @@ class FullscreenImageViewer(QWidget):
 
         # Panning
         self._pan_start: QPoint | None = None
-        self._scroll_offset = QPoint(0, 0)
 
         # Filter mode
         self._smooth_filter: bool = True
+
+        # Info overlay visibility
+        self._info_overlay_visible: bool = False
 
         self._setup_ui()
 
@@ -52,19 +56,29 @@ class FullscreenImageViewer(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Scroll area for panning
+        # Scroll area for large images
         self._scroll_area = QScrollArea()
         self._scroll_area.setWidgetResizable(False)
+        self._scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll_area.setStyleSheet("QScrollArea { border: none; background-color: black; }")
 
+        # Image label inside scroll area
         self._image_label = QLabel()
         self._image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._image_label.setStyleSheet("background-color: black;")
         self._scroll_area.setWidget(self._image_label)
 
         layout.addWidget(self._scroll_area, stretch=1)
+
+        # Info overlay (top-left, hidden by default)
+        self._info_overlay = QLabel(self)
+        self._info_overlay.setStyleSheet(
+            "color: white; background-color: rgba(0, 0, 0, 180); padding: 10px; font-family: monospace;"
+        )
+        self._info_overlay.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._info_overlay.hide()
 
         # Info label (bottom)
         self._info_label = QLabel()
@@ -98,7 +112,6 @@ class FullscreenImageViewer(QWidget):
         self._rotation = 0
         self._flip_h = False
         self._flip_v = False
-        self._scroll_offset = QPoint(0, 0)
 
     def _load_current_image(self):
         """Load and display current image."""
@@ -106,14 +119,27 @@ class FullscreenImageViewer(QWidget):
             return
 
         path = self._image_list[self._current_index]
-        self._original_pixmap = QPixmap(str(path))
+        self._original_pixmap = load_pixmap(path)
 
         if self._original_pixmap.isNull():
             self._image_label.setText(f"Cannot load: {path.name}")
             return
 
+        # Calculate fit-to-screen scale and set as initial zoom
+        self._zoom_level = self._get_fit_scale()
         self._update_display()
         self._update_info()
+
+    def _get_fit_scale(self) -> float:
+        """Calculate scale to fit image to screen (show entire image)."""
+        if self._original_pixmap is None or self._original_pixmap.isNull():
+            return 1.0
+        transformed = self._get_transformed_pixmap()
+        screen_size = QApplication.primaryScreen().size()
+        return min(
+            screen_size.width() / transformed.width(),
+            screen_size.height() / transformed.height()
+        )
 
     def _get_transformed_pixmap(self) -> QPixmap:
         """Get pixmap with rotation and flip applied."""
@@ -144,49 +170,22 @@ class FullscreenImageViewer(QWidget):
 
         # Get transformed pixmap
         transformed = self._get_transformed_pixmap()
-        screen_size = QApplication.primaryScreen().size()
 
-        if self._zoom_level == 1.0:
-            # Fit to screen
-            scaled = transformed.scaled(
-                screen_size,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation if self._smooth_filter
-                else Qt.TransformationMode.FastTransformation,
-            )
-        else:
-            # Apply zoom
-            new_size = QSize(
-                int(transformed.width() * self._zoom_level),
-                int(transformed.height() * self._zoom_level),
-            )
-            scaled = transformed.scaled(
-                new_size,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation if self._smooth_filter
-                else Qt.TransformationMode.FastTransformation,
-            )
+        # Apply zoom level to original size
+        new_size = QSize(
+            int(transformed.width() * self._zoom_level),
+            int(transformed.height() * self._zoom_level),
+        )
+        scaled = transformed.scaled(
+            new_size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation if self._smooth_filter
+            else Qt.TransformationMode.FastTransformation,
+        )
 
         self._displayed_pixmap = scaled
         self._image_label.setPixmap(scaled)
         self._image_label.resize(scaled.size())
-
-        # Center the image in scroll area
-        self._center_image()
-
-    def _center_image(self):
-        """Center image in scroll area."""
-        if self._displayed_pixmap is None:
-            return
-
-        viewport_size = self._scroll_area.viewport().size()
-        img_size = self._displayed_pixmap.size()
-
-        x = max(0, (img_size.width() - viewport_size.width()) // 2)
-        y = max(0, (img_size.height() - viewport_size.height()) // 2)
-
-        self._scroll_area.horizontalScrollBar().setValue(x + self._scroll_offset.x())
-        self._scroll_area.verticalScrollBar().setValue(y + self._scroll_offset.y())
 
     def _update_info(self):
         """Update info label."""
@@ -304,10 +303,10 @@ class FullscreenImageViewer(QWidget):
         # 보기 모드 submenu
         view_menu = menu.addMenu("보기 모드")
 
-        fit_action = view_menu.addAction("화면에 맞추기 (0)")
-        fit_action.triggered.connect(self._zoom_reset)
+        fit_action = view_menu.addAction("화면에 맞추기 (9)")
+        fit_action.triggered.connect(self._zoom_fit)
 
-        original_action = view_menu.addAction("원본 크기 (1)")
+        original_action = view_menu.addAction("원본 크기 (0, 1)")
         original_action.triggered.connect(self._zoom_original)
 
         view_menu.addSeparator()
@@ -337,7 +336,7 @@ class FullscreenImageViewer(QWidget):
 
         # 파일 정보/EXIF 정보 보기
         info_action = menu.addAction("파일 정보/EXIF 정보 보기 (TAB)")
-        info_action.triggered.connect(self._show_file_info)
+        info_action.triggered.connect(self._toggle_file_info)
 
         menu.addSeparator()
 
@@ -630,10 +629,9 @@ class FullscreenImageViewer(QWidget):
             self._update_display()
             self._update_info()
 
-    def _zoom_reset(self):
-        """Reset zoom to fit screen."""
-        self._zoom_level = 1.0
-        self._scroll_offset = QPoint(0, 0)
+    def _zoom_fit(self):
+        """Fit image to screen (show entire image, key 9)."""
+        self._zoom_level = self._get_fit_scale()
         self._update_display()
         self._update_info()
 
@@ -642,16 +640,7 @@ class FullscreenImageViewer(QWidget):
         if self._original_pixmap is None:
             return
 
-        screen_size = QApplication.primaryScreen().size()
-        transformed = self._get_transformed_pixmap()
-
-        # Calculate zoom level for original size
-        fit_scale = min(
-            screen_size.width() / transformed.width(),
-            screen_size.height() / transformed.height()
-        )
-        self._zoom_level = 1.0 / fit_scale
-        self._scroll_offset = QPoint(0, 0)
+        self._zoom_level = 1.0
         self._update_display()
         self._update_info()
 
@@ -662,25 +651,33 @@ class FullscreenImageViewer(QWidget):
             self, "확대/축소", "확대율 (%):", current, 10, 1000
         )
         if ok:
-            # Calculate the actual zoom level
-            screen_size = QApplication.primaryScreen().size()
-            transformed = self._get_transformed_pixmap()
-            fit_scale = min(
-                screen_size.width() / transformed.width(),
-                screen_size.height() / transformed.height()
-            )
-            self._zoom_level = (value / 100.0) / fit_scale
+            self._zoom_level = value / 100.0
             self._update_display()
             self._update_info()
 
     # === File Info ===
 
-    def _show_file_info(self):
-        """Show file info dialog."""
+    def _toggle_file_info(self):
+        """Toggle file info overlay (꿀뷰 style)."""
+        self._info_overlay_visible = not self._info_overlay_visible
+
+        if self._info_overlay_visible:
+            self._update_info_overlay()
+            self._info_overlay.show()
+        else:
+            self._info_overlay.hide()
+
+    def _update_info_overlay(self):
+        """Update info overlay content."""
         if not self._image_list:
             return
 
         path = self._image_list[self._current_index]
+        lines = []
+
+        # Basic file info
+        lines.append(f"파일: {path.name}")
+        lines.append(f"경로: {path.parent}")
 
         try:
             stat = path.stat()
@@ -691,39 +688,48 @@ class FullscreenImageViewer(QWidget):
                 size_str = f"{size/1024:.1f} KB"
             else:
                 size_str = f"{size/1024/1024:.1f} MB"
+            lines.append(f"크기: {size_str}")
 
             from datetime import datetime
             mtime = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            lines.append(f"수정일: {mtime}")
 
-            info = f"""파일명: {path.name}
-경로: {path.parent}
-크기: {size_str}
-수정일: {mtime}
-"""
-            if self._original_pixmap and not self._original_pixmap.isNull():
-                info += f"해상도: {self._original_pixmap.width()} x {self._original_pixmap.height()}"
+            if hasattr(stat, 'st_birthtime'):
+                ctime = datetime.fromtimestamp(stat.st_birthtime).strftime("%Y-%m-%d %H:%M:%S")
+                lines.append(f"생성일: {ctime}")
+        except:
+            pass
 
-            # Try to read EXIF
-            try:
-                from PIL import Image
-                from PIL.ExifTags import TAGS
+        # Image info
+        if self._original_pixmap and not self._original_pixmap.isNull():
+            lines.append(f"해상도: {self._original_pixmap.width()} x {self._original_pixmap.height()}")
+            lines.append(f"비트 깊이: {self._original_pixmap.depth()}")
 
-                with Image.open(path) as img:
-                    exif_data = img._getexif()
-                    if exif_data:
-                        info += "\n\n=== EXIF 정보 ===\n"
-                        important_tags = ['Make', 'Model', 'DateTime', 'ExposureTime',
-                                        'FNumber', 'ISOSpeedRatings', 'FocalLength']
-                        for tag_id, value in exif_data.items():
-                            tag = TAGS.get(tag_id, tag_id)
-                            if tag in important_tags:
-                                info += f"{tag}: {value}\n"
-            except:
-                pass
+        # Try to read all EXIF data
+        try:
+            from PIL import Image
+            from PIL.ExifTags import TAGS
 
-            QMessageBox.information(self, "파일 정보", info)
-        except Exception as e:
-            QMessageBox.warning(self, "Error", f"정보를 읽을 수 없습니다: {e}")
+            with Image.open(path) as img:
+                lines.append(f"포맷: {img.format}")
+                lines.append(f"모드: {img.mode}")
+
+                exif_data = img._getexif()
+                if exif_data:
+                    lines.append("")
+                    lines.append("=== EXIF ===")
+                    for tag_id, value in sorted(exif_data.items()):
+                        tag = TAGS.get(tag_id, tag_id)
+                        # Skip binary/long data
+                        if isinstance(value, bytes) or (isinstance(value, str) and len(value) > 100):
+                            continue
+                        lines.append(f"{tag}: {value}")
+        except:
+            pass
+
+        self._info_overlay.setText("\n".join(lines))
+        self._info_overlay.adjustSize()
+        self._info_overlay.move(10, 10)
 
     # === Event Handlers ===
 
@@ -745,9 +751,11 @@ class FullscreenImageViewer(QWidget):
         elif key == Qt.Key.Key_Minus:
             self._zoom_out()
         elif key == Qt.Key.Key_0:
-            self._zoom_reset()
+            self._zoom_original()  # 100% 원본 크기
+        elif key == Qt.Key.Key_9:
+            self._zoom_fit()  # 화면에 맞추기
         elif key == Qt.Key.Key_1:
-            self._zoom_original()
+            self._zoom_original()  # 100% 원본 크기
         elif key == Qt.Key.Key_Home:
             self._current_index = 0
             self._reset_transform()
@@ -768,7 +776,7 @@ class FullscreenImageViewer(QWidget):
         elif key == Qt.Key.Key_Delete:
             self._delete_current()
         elif key == Qt.Key.Key_Tab:
-            self._show_file_info()
+            self._toggle_file_info()
         elif key == Qt.Key.Key_F2:
             self._open_file_dialog()
         elif key == Qt.Key.Key_F:
@@ -807,17 +815,10 @@ class FullscreenImageViewer(QWidget):
     def mousePressEvent(self, event):
         """Handle mouse click."""
         if event.button() == Qt.MouseButton.LeftButton:
-            # Start panning if zoomed
-            if self._zoom_level > 1.0:
-                self._pan_start = event.pos()
-            else:
-                # Click on left half -> previous, right half -> next
-                if event.position().x() < self.width() / 2:
-                    self._prev_image()
-                else:
-                    self._next_image()
+            # Start panning (for zoomed images)
+            self._pan_start = event.pos()
         elif event.button() == Qt.MouseButton.MiddleButton:
-            self._zoom_reset()
+            self._zoom_fit()
 
     def mouseMoveEvent(self, event):
         """Handle mouse move for panning."""
