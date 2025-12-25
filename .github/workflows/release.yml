@@ -1,0 +1,98 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            artifact_name: HoneyCommander-macOS.zip
+          - os: windows-latest
+            artifact_name: HoneyCommander-Windows.zip
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: |
+          uv sync
+          uv pip install pyinstaller
+
+      - name: Build with PyInstaller (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          uv run pyinstaller src/commander/__main__.py \
+            --name="HoneyCommander" \
+            --windowed \
+            --icon=assets/icon.icns \
+            --osx-bundle-identifier=com.honeycommander.app \
+            --hidden-import=PySide6.QtSvg \
+            --hidden-import=PIL.Image \
+            --collect-submodules=commander \
+            --paths=src \
+            --add-data="assets:assets" \
+            --add-data="src/commander/locales:commander/locales"
+
+      - name: Build with PyInstaller (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          uv run pyinstaller src/commander/__main__.py `
+            --name="HoneyCommander" `
+            --windowed `
+            --icon=assets/icon.png `
+            --hidden-import=PySide6.QtSvg `
+            --hidden-import=PIL.Image `
+            --collect-submodules=commander `
+            --paths=src `
+            --add-data="assets;assets" `
+            --add-data="src/commander/locales;commander/locales"
+
+      - name: Create ZIP (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          cd dist
+          zip -r ${{ matrix.artifact_name }} HoneyCommander.app
+
+      - name: Create ZIP (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          Compress-Archive -Path dist/HoneyCommander/* -DestinationPath dist/${{ matrix.artifact_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.artifact_name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.zip
+          generate_release_notes: true

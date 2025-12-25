@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QPixmap
 
 from commander.core.image_loader import load_pixmap, ALL_IMAGE_FORMATS
+from commander.utils.i18n import tr
 
 
 class PreviewPanel(QWidget):
@@ -57,7 +58,7 @@ class PreviewPanel(QWidget):
     def _show_placeholder(self):
         """Show placeholder when nothing is selected."""
         self._image_label.clear()
-        self._info_label.setText("Select a file to preview")
+        self._info_label.setText(tr("select_file_to_preview"))
 
     def show_preview(self, path: Path):
         """Show preview for selected file."""
@@ -89,7 +90,7 @@ class PreviewPanel(QWidget):
                 )
                 self._image_label.setPixmap(scaled)
             else:
-                self._image_label.setText("Cannot load image")
+                self._image_label.setText(tr("cannot_load_image"))
         except Exception as e:
             self._image_label.setText(f"Error: {e}")
 

@@ -1,11 +1,31 @@
 """Entry point for Commander application."""
 
 import sys
+import traceback
 from pathlib import Path
 
+
+def setup_crash_log():
+    """Setup crash logging for frozen apps."""
+    if getattr(sys, 'frozen', False):
+        log_path = Path.home() / "HoneyCommander_crash.log"
+
+        def exception_hook(exc_type, exc_value, exc_tb):
+            with open(log_path, "w", encoding="utf-8") as f:
+                f.write(f"Crash at: {__import__('datetime').datetime.now()}\n\n")
+                f.write("".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
+            sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+        sys.excepthook = exception_hook
+
+
+setup_crash_log()
+
 from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QIcon
 
 from commander.views.main_window import MainWindow
+from commander.utils.i18n import tr
 
 
 # Supported image formats
@@ -25,9 +45,34 @@ def get_images_in_folder(folder: Path) -> list[Path]:
 
 
 def main():
+    # Get app name from i18n
+    app_name = tr("app_name")
+
+    # Set app info before creating QApplication for proper macOS menu bar
+    if sys.platform == "darwin":
+        # This must be done before QApplication is created
+        try:
+            from Foundation import NSBundle
+            bundle = NSBundle.mainBundle()
+            info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+            if info:
+                info["CFBundleName"] = app_name
+        except ImportError:
+            pass  # pyobjc not installed
+
     app = QApplication(sys.argv)
-    app.setApplicationName("꿀 커맨더")
+    app.setApplicationName(app_name)
+    app.setApplicationDisplayName(app_name)
     app.setOrganizationName("HoneyCommander")
+
+    # Set app icon
+    if getattr(sys, 'frozen', False):
+        # PyInstaller frozen app
+        icon_path = Path(sys._MEIPASS) / "assets" / "icon.png"
+    else:
+        icon_path = Path(__file__).parent.parent.parent / "assets" / "icon.png"
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
 
     # Check if an image file was passed as argument
     if len(sys.argv) > 1:
