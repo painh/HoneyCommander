@@ -324,6 +324,17 @@ class FullscreenImageViewer(QWidget):
 
         menu.addSeparator()
 
+        # 폴더 이동
+        folder_menu = menu.addMenu("폴더 이동")
+
+        prev_folder_action = folder_menu.addAction("이전 폴더 ([)")
+        prev_folder_action.triggered.connect(self._prev_folder)
+
+        next_folder_action = folder_menu.addAction("다음 폴더 (])")
+        next_folder_action.triggered.connect(self._next_folder)
+
+        menu.addSeparator()
+
         # 파일 정보/EXIF 정보 보기
         info_action = menu.addAction("파일 정보/EXIF 정보 보기 (TAB)")
         info_action.triggered.connect(self._show_file_info)
@@ -396,6 +407,71 @@ class FullscreenImageViewer(QWidget):
         images = [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in extensions]
         images.sort()
         return images
+
+    def _get_sibling_folders(self) -> list[Path]:
+        """Get sibling folders that contain images."""
+        if not self._image_list:
+            return []
+
+        current_folder = self._image_list[self._current_index].parent
+        parent = current_folder.parent
+
+        try:
+            folders = sorted([
+                f for f in parent.iterdir()
+                if f.is_dir() and self._get_images_in_folder(f)
+            ])
+            return folders
+        except (PermissionError, OSError):
+            return [current_folder]
+
+    def _prev_folder(self):
+        """Go to previous sibling folder."""
+        if not self._image_list:
+            return
+
+        current_folder = self._image_list[self._current_index].parent
+        folders = self._get_sibling_folders()
+
+        if not folders:
+            return
+
+        try:
+            idx = folders.index(current_folder)
+            if idx > 0:
+                new_folder = folders[idx - 1]
+                images = self._get_images_in_folder(new_folder)
+                if images:
+                    self._image_list = images
+                    self._current_index = 0
+                    self._reset_transform()
+                    self._load_current_image()
+        except ValueError:
+            pass
+
+    def _next_folder(self):
+        """Go to next sibling folder."""
+        if not self._image_list:
+            return
+
+        current_folder = self._image_list[self._current_index].parent
+        folders = self._get_sibling_folders()
+
+        if not folders:
+            return
+
+        try:
+            idx = folders.index(current_folder)
+            if idx < len(folders) - 1:
+                new_folder = folders[idx + 1]
+                images = self._get_images_in_folder(new_folder)
+                if images:
+                    self._image_list = images
+                    self._current_index = 0
+                    self._reset_transform()
+                    self._load_current_image()
+        except ValueError:
+            pass
 
     def _select_image(self):
         """Return to explorer with current image selected."""
@@ -713,16 +789,20 @@ class FullscreenImageViewer(QWidget):
         elif key == Qt.Key.Key_Insert:
             if sys.platform == "darwin":
                 self._copy_to_photos()
+        elif key == Qt.Key.Key_BracketLeft:
+            self._prev_folder()
+        elif key == Qt.Key.Key_BracketRight:
+            self._next_folder()
         else:
             super().keyPressEvent(event)
 
     def wheelEvent(self, event: QWheelEvent):
-        """Handle mouse wheel for zoom."""
+        """Handle mouse wheel for navigation."""
         delta = event.angleDelta().y()
         if delta > 0:
-            self._zoom_in()
+            self._prev_image()  # Wheel up = previous
         elif delta < 0:
-            self._zoom_out()
+            self._next_image()  # Wheel down = next
 
     def mousePressEvent(self, event):
         """Handle mouse click."""
