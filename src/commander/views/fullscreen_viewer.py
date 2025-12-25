@@ -6,11 +6,25 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal, QSize, QPoint
 from PySide6.QtWidgets import (
-    QWidget, QLabel, QVBoxLayout, QHBoxLayout, QApplication, QMenu,
-    QMessageBox, QInputDialog, QFileDialog, QScrollArea,
+    QWidget,
+    QLabel,
+    QVBoxLayout,
+    QHBoxLayout,
+    QApplication,
+    QMenu,
+    QMessageBox,
+    QInputDialog,
+    QFileDialog,
+    QScrollArea,
 )
 from PySide6.QtGui import (
-    QPixmap, QKeyEvent, QWheelEvent, QTransform, QCursor,
+    QPixmap,
+    QKeyEvent,
+    QWheelEvent,
+    QTransform,
+    QCursor,
+    QMovie,
+    QImage,
 )
 
 from commander.core.image_loader import load_pixmap
@@ -21,11 +35,12 @@ class FullscreenImageViewer(QWidget):
 
     closed = Signal()
 
+    # Animated formats
+    ANIMATED_FORMATS = {".gif", ".webp"}
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(
-            Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint
-        )
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
         self._image_list: list[Path] = []
@@ -45,6 +60,13 @@ class FullscreenImageViewer(QWidget):
 
         # Info overlay visibility
         self._info_overlay_visible: bool = False
+
+        # Animation support
+        self._movie: QMovie | None = None
+        self._is_animated: bool = False
+        self._frame_count: int = 0
+        self._current_frame: int = 0
+        self._frame_thumbnails: list[QPixmap] = []
 
         self._setup_ui()
 
@@ -71,6 +93,45 @@ class FullscreenImageViewer(QWidget):
         self._scroll_area.setWidget(self._image_label)
 
         layout.addWidget(self._scroll_area, stretch=1)
+
+        # Frame preview panel (for animated images)
+        self._frame_panel = QWidget()
+        self._frame_panel.setStyleSheet("background-color: rgba(0, 0, 0, 200);")
+        self._frame_panel.setFixedHeight(100)
+        self._frame_panel.hide()
+
+        frame_layout = QHBoxLayout(self._frame_panel)
+        frame_layout.setContentsMargins(10, 5, 10, 5)
+        frame_layout.setSpacing(5)
+
+        # Play/Pause button
+        self._play_button = QLabel("▶")
+        self._play_button.setStyleSheet("color: white; font-size: 24px; padding: 5px;")
+        self._play_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._play_button.mousePressEvent = lambda e: self._toggle_animation()
+        frame_layout.addWidget(self._play_button)
+
+        # Frame scroll area
+        self._frame_scroll = QScrollArea()
+        self._frame_scroll.setWidgetResizable(True)
+        self._frame_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._frame_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._frame_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+        self._frame_container = QWidget()
+        self._frame_container_layout = QHBoxLayout(self._frame_container)
+        self._frame_container_layout.setContentsMargins(0, 0, 0, 0)
+        self._frame_container_layout.setSpacing(3)
+        self._frame_scroll.setWidget(self._frame_container)
+
+        frame_layout.addWidget(self._frame_scroll, stretch=1)
+
+        # Frame info
+        self._frame_info = QLabel("0/0")
+        self._frame_info.setStyleSheet("color: white; font-size: 14px; padding: 5px;")
+        frame_layout.addWidget(self._frame_info)
+
+        layout.addWidget(self._frame_panel)
 
         # Info overlay (top-left, hidden by default)
         self._info_overlay = QLabel(self)
@@ -112,13 +173,27 @@ class FullscreenImageViewer(QWidget):
         self._rotation = 0
         self._flip_h = False
         self._flip_v = False
+        self._stop_animation()
 
     def _load_current_image(self):
         """Load and display current image."""
         if not self._image_list:
             return
 
+        # Stop any existing animation
+        self._stop_animation()
+
         path = self._image_list[self._current_index]
+        suffix = path.suffix.lower()
+
+        # Check if this is an animated format
+        if suffix in self.ANIMATED_FORMATS:
+            if self._load_animated(path):
+                return
+
+        # Static image fallback
+        self._is_animated = False
+        self._frame_panel.hide()
         self._original_pixmap = load_pixmap(path)
 
         if self._original_pixmap.isNull():
@@ -130,6 +205,185 @@ class FullscreenImageViewer(QWidget):
         self._update_display()
         self._update_info()
 
+    def _load_animated(self, path: Path) -> bool:
+        """Load animated image (GIF/WebP). Returns True if animated."""
+        # Check frame count using PIL first
+        try:
+            from PIL import Image
+
+            with Image.open(path) as img:
+                frame_count = getattr(img, "n_frames", 1)
+                if frame_count <= 1:
+                    return False  # Not animated, use static loader
+        except Exception:
+            return False
+
+        self._is_animated = True
+        self._frame_count = frame_count
+
+        # Use QMovie for animation playback
+        self._movie = QMovie(str(path))
+        if not self._movie.isValid():
+            self._movie = None
+            return False
+
+        # Connect frame changed signal
+        self._movie.frameChanged.connect(self._on_frame_changed)
+
+        # Generate frame thumbnails
+        self._generate_frame_thumbnails(path)
+
+        # Setup display
+        self._movie.jumpToFrame(0)
+        self._current_frame = 0
+
+        # Get first frame as original pixmap for zoom calculations
+        self._original_pixmap = self._movie.currentPixmap()
+
+        # Calculate fit-to-screen scale
+        self._zoom_level = self._get_fit_scale()
+
+        # Start playing
+        self._movie.start()
+        self._play_button.setText("⏸")
+
+        # Show frame panel
+        self._frame_panel.show()
+        self._update_frame_info()
+        self._update_info()
+
+        return True
+
+    def _generate_frame_thumbnails(self, path: Path):
+        """Generate thumbnails for all frames."""
+        # Clear existing thumbnails
+        self._frame_thumbnails.clear()
+        while self._frame_container_layout.count():
+            item = self._frame_container_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        try:
+            from PIL import Image
+
+            thumb_size = 70
+            with Image.open(path) as img:
+                for i in range(self._frame_count):
+                    img.seek(i)
+                    # Convert frame to thumbnail
+                    frame = img.copy()
+                    frame.thumbnail((thumb_size, thumb_size))
+
+                    # Convert PIL to QPixmap
+                    if frame.mode != "RGBA":
+                        frame = frame.convert("RGBA")
+
+                    from io import BytesIO
+
+                    buffer = BytesIO()
+                    frame.save(buffer, format="PNG")
+                    buffer.seek(0)
+
+                    pixmap = QPixmap()
+                    pixmap.loadFromData(buffer.getvalue())
+                    self._frame_thumbnails.append(pixmap)
+
+                    # Create thumbnail label
+                    thumb_label = QLabel()
+                    thumb_label.setPixmap(pixmap)
+                    thumb_label.setFixedSize(thumb_size, thumb_size)
+                    thumb_label.setStyleSheet("border: 2px solid transparent; background: #333;")
+                    thumb_label.setCursor(Qt.CursorShape.PointingHandCursor)
+                    thumb_label.setProperty("frame_index", i)
+                    thumb_label.mousePressEvent = lambda e, idx=i: self._jump_to_frame(idx)
+                    self._frame_container_layout.addWidget(thumb_label)
+
+        except Exception as e:
+            print(f"Error generating thumbnails: {e}")
+
+    def _on_frame_changed(self, frame_number: int):
+        """Handle frame change in animation."""
+        self._current_frame = frame_number
+        if self._movie:
+            pixmap = self._movie.currentPixmap()
+            if not pixmap.isNull():
+                # Apply zoom
+                new_size = QSize(
+                    int(pixmap.width() * self._zoom_level),
+                    int(pixmap.height() * self._zoom_level),
+                )
+                scaled = pixmap.scaled(
+                    new_size,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                    if self._smooth_filter
+                    else Qt.TransformationMode.FastTransformation,
+                )
+                self._image_label.setPixmap(scaled)
+                self._image_label.resize(scaled.size())
+
+        self._update_frame_info()
+        self._highlight_current_frame()
+
+    def _highlight_current_frame(self):
+        """Highlight current frame thumbnail."""
+        for i in range(self._frame_container_layout.count()):
+            item = self._frame_container_layout.itemAt(i)
+            if item and item.widget():
+                widget = item.widget()
+                if widget.property("frame_index") == self._current_frame:
+                    widget.setStyleSheet("border: 2px solid #0078d4; background: #333;")
+                    # Scroll to make visible
+                    self._frame_scroll.ensureWidgetVisible(widget)
+                else:
+                    widget.setStyleSheet("border: 2px solid transparent; background: #333;")
+
+    def _update_frame_info(self):
+        """Update frame info label."""
+        self._frame_info.setText(f"{self._current_frame + 1}/{self._frame_count}")
+
+    def _toggle_animation(self):
+        """Toggle animation play/pause."""
+        if self._movie:
+            if self._movie.state() == QMovie.MovieState.Running:
+                self._movie.setPaused(True)
+                self._play_button.setText("▶")
+            else:
+                self._movie.setPaused(False)
+                self._play_button.setText("⏸")
+
+    def _jump_to_frame(self, frame_index: int):
+        """Jump to specific frame."""
+        if self._movie:
+            was_running = self._movie.state() == QMovie.MovieState.Running
+            self._movie.setPaused(True)
+            self._movie.jumpToFrame(frame_index)
+            self._current_frame = frame_index
+            self._on_frame_changed(frame_index)
+            if was_running:
+                self._movie.setPaused(False)
+
+    def _stop_animation(self):
+        """Stop and cleanup animation."""
+        if self._movie:
+            self._movie.stop()
+            self._movie.frameChanged.disconnect(self._on_frame_changed)
+            self._movie = None
+        self._is_animated = False
+        self._frame_thumbnails.clear()
+
+    def _next_frame(self):
+        """Go to next frame in animation."""
+        if self._movie and self._is_animated:
+            next_frame = (self._current_frame + 1) % self._frame_count
+            self._jump_to_frame(next_frame)
+
+    def _prev_frame(self):
+        """Go to previous frame in animation."""
+        if self._movie and self._is_animated:
+            prev_frame = (self._current_frame - 1) % self._frame_count
+            self._jump_to_frame(prev_frame)
+
     def _get_fit_scale(self) -> float:
         """Calculate scale to fit image to screen (show entire image)."""
         if self._original_pixmap is None or self._original_pixmap.isNull():
@@ -137,8 +391,7 @@ class FullscreenImageViewer(QWidget):
         transformed = self._get_transformed_pixmap()
         screen_size = QApplication.primaryScreen().size()
         return min(
-            screen_size.width() / transformed.width(),
-            screen_size.height() / transformed.height()
+            screen_size.width() / transformed.width(), screen_size.height() / transformed.height()
         )
 
     def _get_transformed_pixmap(self) -> QPixmap:
@@ -161,7 +414,9 @@ class FullscreenImageViewer(QWidget):
         if transform.isIdentity():
             return self._original_pixmap
 
-        return self._original_pixmap.transformed(transform, Qt.TransformationMode.SmoothTransformation)
+        return self._original_pixmap.transformed(
+            transform, Qt.TransformationMode.SmoothTransformation
+        )
 
     def _update_display(self):
         """Update displayed image with current zoom."""
@@ -179,7 +434,8 @@ class FullscreenImageViewer(QWidget):
         scaled = transformed.scaled(
             new_size,
             Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation if self._smooth_filter
+            Qt.TransformationMode.SmoothTransformation
+            if self._smooth_filter
             else Qt.TransformationMode.FastTransformation,
         )
 
@@ -203,9 +459,9 @@ class FullscreenImageViewer(QWidget):
             if size < 1024:
                 size_str = f"{size} B"
             elif size < 1024 * 1024:
-                size_str = f"{size/1024:.1f} KB"
+                size_str = f"{size / 1024:.1f} KB"
             else:
-                size_str = f"{size/1024/1024:.1f} MB"
+                size_str = f"{size / 1024 / 1024:.1f} MB"
         except:
             size_str = ""
 
@@ -215,9 +471,16 @@ class FullscreenImageViewer(QWidget):
         else:
             res_str = ""
 
-        self._info_label.setText(
-            f"{path.name} | {current}/{total} | {res_str} | {size_str} | {zoom_percent}%"
-        )
+        # Animation info
+        if self._is_animated:
+            anim_str = f"프레임 {self._current_frame + 1}/{self._frame_count}"
+            self._info_label.setText(
+                f"{path.name} | {current}/{total} | {res_str} | {size_str} | {zoom_percent}% | {anim_str}"
+            )
+        else:
+            self._info_label.setText(
+                f"{path.name} | {current}/{total} | {res_str} | {size_str} | {zoom_percent}%"
+            )
 
     def _show_context_menu(self, pos):
         """Show context menu (꿀뷰 style)."""
@@ -374,8 +637,10 @@ class FullscreenImageViewer(QWidget):
         path, _ = QFileDialog.getOpenFileName(
             self,
             "이미지 열기",
-            str(self._image_list[self._current_index].parent) if self._image_list else str(Path.home()),
-            "Images (*.jpg *.jpeg *.png *.gif *.bmp *.webp *.tiff);;All Files (*)"
+            str(self._image_list[self._current_index].parent)
+            if self._image_list
+            else str(Path.home()),
+            "Images (*.jpg *.jpeg *.png *.gif *.bmp *.webp *.tiff);;All Files (*)",
         )
         if path:
             new_path = Path(path)
@@ -389,7 +654,9 @@ class FullscreenImageViewer(QWidget):
         folder = QFileDialog.getExistingDirectory(
             self,
             "폴더 열기",
-            str(self._image_list[self._current_index].parent) if self._image_list else str(Path.home())
+            str(self._image_list[self._current_index].parent)
+            if self._image_list
+            else str(Path.home()),
         )
         if folder:
             folder_path = Path(folder)
@@ -416,10 +683,9 @@ class FullscreenImageViewer(QWidget):
         parent = current_folder.parent
 
         try:
-            folders = sorted([
-                f for f in parent.iterdir()
-                if f.is_dir() and self._get_images_in_folder(f)
-            ])
+            folders = sorted(
+                [f for f in parent.iterdir() if f.is_dir() and self._get_images_in_folder(f)]
+            )
             return folders
         except (PermissionError, OSError):
             return [current_folder]
@@ -494,11 +760,10 @@ class FullscreenImageViewer(QWidget):
             return
         path = self._image_list[self._current_index]
 
-        dest = QFileDialog.getExistingDirectory(
-            self, "이미지 이동", str(path.parent)
-        )
+        dest = QFileDialog.getExistingDirectory(self, "이미지 이동", str(path.parent))
         if dest:
             import shutil
+
             try:
                 new_path = Path(dest) / path.name
                 shutil.move(str(path), str(new_path))
@@ -521,14 +786,16 @@ class FullscreenImageViewer(QWidget):
 
         path = self._image_list[self._current_index]
         reply = QMessageBox.question(
-            self, "삭제 확인",
+            self,
+            "삭제 확인",
             f"'{path.name}'을(를) 휴지통으로 이동하시겠습니까?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 import send2trash
+
                 send2trash.send2trash(str(path))
 
                 self._image_list.pop(self._current_index)
@@ -547,8 +814,9 @@ class FullscreenImageViewer(QWidget):
             return
         path = self._image_list[self._current_index]
         try:
-            subprocess.run(["osascript", "-e",
-                f'tell application "Photos" to import POSIX file "{path}"'])
+            subprocess.run(
+                ["osascript", "-e", f'tell application "Photos" to import POSIX file "{path}"']
+            )
         except Exception as e:
             QMessageBox.warning(self, "Error", f"복사 실패: {e}")
 
@@ -647,9 +915,7 @@ class FullscreenImageViewer(QWidget):
     def _show_zoom_dialog(self):
         """Show zoom level dialog."""
         current = int(self._zoom_level * 100)
-        value, ok = QInputDialog.getInt(
-            self, "확대/축소", "확대율 (%):", current, 10, 1000
-        )
+        value, ok = QInputDialog.getInt(self, "확대/축소", "확대율 (%):", current, 10, 1000)
         if ok:
             self._zoom_level = value / 100.0
             self._update_display()
@@ -685,16 +951,17 @@ class FullscreenImageViewer(QWidget):
             if size < 1024:
                 size_str = f"{size} B"
             elif size < 1024 * 1024:
-                size_str = f"{size/1024:.1f} KB"
+                size_str = f"{size / 1024:.1f} KB"
             else:
-                size_str = f"{size/1024/1024:.1f} MB"
+                size_str = f"{size / 1024 / 1024:.1f} MB"
             lines.append(f"크기: {size_str}")
 
             from datetime import datetime
+
             mtime = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
             lines.append(f"수정일: {mtime}")
 
-            if hasattr(stat, 'st_birthtime'):
+            if hasattr(stat, "st_birthtime"):
                 ctime = datetime.fromtimestamp(stat.st_birthtime).strftime("%Y-%m-%d %H:%M:%S")
                 lines.append(f"생성일: {ctime}")
         except:
@@ -702,7 +969,9 @@ class FullscreenImageViewer(QWidget):
 
         # Image info
         if self._original_pixmap and not self._original_pixmap.isNull():
-            lines.append(f"해상도: {self._original_pixmap.width()} x {self._original_pixmap.height()}")
+            lines.append(
+                f"해상도: {self._original_pixmap.width()} x {self._original_pixmap.height()}"
+            )
             lines.append(f"비트 깊이: {self._original_pixmap.depth()}")
 
         # Try to read all EXIF data
@@ -721,7 +990,9 @@ class FullscreenImageViewer(QWidget):
                     for tag_id, value in sorted(exif_data.items()):
                         tag = TAGS.get(tag_id, tag_id)
                         # Skip binary/long data
-                        if isinstance(value, bytes) or (isinstance(value, str) and len(value) > 100):
+                        if isinstance(value, bytes) or (
+                            isinstance(value, str) and len(value) > 100
+                        ):
                             continue
                         lines.append(f"{tag}: {value}")
         except:
@@ -742,9 +1013,25 @@ class FullscreenImageViewer(QWidget):
             self.close()
         elif key == Qt.Key.Key_F4:
             self.close()
-        elif key in (Qt.Key.Key_Right, Qt.Key.Key_Space, Qt.Key.Key_PageDown):
-            self._next_image()
-        elif key in (Qt.Key.Key_Left, Qt.Key.Key_Backspace, Qt.Key.Key_PageUp):
+        elif key == Qt.Key.Key_Space:
+            # Space: toggle animation if animated, otherwise next image
+            if self._is_animated:
+                self._toggle_animation()
+            else:
+                self._next_image()
+        elif key in (Qt.Key.Key_Right, Qt.Key.Key_PageDown):
+            if self._is_animated and modifiers & Qt.KeyboardModifier.ShiftModifier:
+                # Shift+Right: next frame
+                self._next_frame()
+            else:
+                self._next_image()
+        elif key in (Qt.Key.Key_Left, Qt.Key.Key_PageUp):
+            if self._is_animated and modifiers & Qt.KeyboardModifier.ShiftModifier:
+                # Shift+Left: prev frame
+                self._prev_frame()
+            else:
+                self._prev_image()
+        elif key == Qt.Key.Key_Backspace:
             self._prev_image()
         elif key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
             self._zoom_in()
