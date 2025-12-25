@@ -29,7 +29,9 @@ from commander.views.folder_tree import FolderTreeView
 from commander.views.file_list import FileListView
 from commander.views.preview_panel import PreviewPanel
 from commander.widgets.address_bar import AddressBar
+from commander.widgets.favorites_panel import FavoritesPanel
 from commander.core.file_operations import FileOperations
+from commander.utils.settings import Settings
 
 
 class MainWindow(QMainWindow):
@@ -37,6 +39,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self._settings = Settings()
         self._current_path: Path = Path.home()
         self._history: list[Path] = [self._current_path]
         self._history_index: int = 0
@@ -47,9 +50,9 @@ class MainWindow(QMainWindow):
         self._setup_menu()
         self._setup_shortcuts()
         self._connect_signals()
+        self._load_settings()
 
         self.setWindowTitle("Commander")
-        self.resize(1200, 800)
 
     def _setup_ui(self):
         """Setup the main UI layout."""
@@ -67,11 +70,22 @@ class MainWindow(QMainWindow):
         # 3-panel splitter
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
 
+        # Left panel: Favorites + Folder tree
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
+
+        self._favorites_panel = FavoritesPanel()
         self._folder_tree = FolderTreeView()
+
+        left_layout.addWidget(self._favorites_panel)
+        left_layout.addWidget(self._folder_tree, stretch=1)
+
         self._file_list = FileListView()
         self._preview_panel = PreviewPanel()
 
-        self._splitter.addWidget(self._folder_tree)
+        self._splitter.addWidget(left_panel)
         self._splitter.addWidget(self._file_list)
         self._splitter.addWidget(self._preview_panel)
 
@@ -229,6 +243,9 @@ class MainWindow(QMainWindow):
         # Folder tree selection -> file list update
         self._folder_tree.folder_selected.connect(self._on_folder_selected)
 
+        # Favorites panel selection
+        self._favorites_panel.folder_selected.connect(self._navigate_to)
+
         # File list double click -> navigate or open
         self._file_list.item_activated.connect(self._on_item_activated)
 
@@ -237,6 +254,47 @@ class MainWindow(QMainWindow):
 
         # Address bar navigation
         self._address_bar.path_changed.connect(self._navigate_to)
+
+        # Address bar favorite toggle -> refresh favorites panel
+        self._address_bar.favorite_toggled.connect(self._on_favorite_toggled)
+
+    def _on_favorite_toggled(self, path: Path, is_favorite: bool):
+        """Handle favorite toggle."""
+        self._favorites_panel.refresh()
+
+    def _load_settings(self):
+        """Load saved settings."""
+        # Window geometry
+        geometry = self._settings.load_window_geometry()
+        if geometry:
+            self.restoreGeometry(geometry)
+        else:
+            self.resize(1200, 800)
+
+        # Splitter sizes
+        sizes = self._settings.load_splitter_sizes()
+        if sizes:
+            self._splitter.setSizes(sizes)
+
+        # Last path
+        last_path = self._settings.load_last_path()
+        if last_path:
+            self._current_path = last_path
+
+        # View mode
+        view_mode = self._settings.load_view_mode()
+        self._file_list.set_view_mode(view_mode)
+
+    def _save_settings(self):
+        """Save current settings."""
+        self._settings.save_window_geometry(self.saveGeometry())
+        self._settings.save_splitter_sizes(self._splitter.sizes())
+        self._settings.save_last_path(self._current_path)
+
+    def closeEvent(self, event):
+        """Save settings on close."""
+        self._save_settings()
+        super().closeEvent(event)
 
     def _navigate_to(self, path: Path):
         """Navigate to a directory."""
