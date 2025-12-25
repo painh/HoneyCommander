@@ -105,7 +105,7 @@ class FullscreenImageViewer(QWidget):
         self._pan_start: QPoint | None = None
 
         # Filter mode
-        self._smooth_filter: bool = True
+        self._smooth_filter: bool = False  # Crispy/sharp filter by default
 
         # Info overlay visibility
         self._info_overlay_visible: bool = False
