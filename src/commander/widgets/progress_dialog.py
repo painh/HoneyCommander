@@ -1,5 +1,7 @@
 """Progress dialog for file operations."""
 
+from __future__ import annotations
+
 import time
 from pathlib import Path
 
@@ -13,6 +15,8 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 
+from commander.core.file_operations import ConflictResolution
+
 
 class FileOperationWorker(QThread):
     """Worker thread for file operations."""
@@ -21,17 +25,25 @@ class FileOperationWorker(QThread):
     finished = Signal(int)  # count of successful operations
     error = Signal(str)
 
-    def __init__(self, operation: str, sources: list[Path], destination: Path):
+    def __init__(
+        self,
+        operation: str,
+        sources: list[Path],
+        destination: Path,
+        conflict_resolution: ConflictResolution = ConflictResolution.RENAME,
+    ):
         super().__init__()
         self.operation = operation  # "copy", "move", "paste"
         self.sources = sources
         self.destination = destination
+        self.conflict_resolution = conflict_resolution
         self._cancelled = False
         self._result = 0
 
     def run(self):
         """Run the file operation."""
         from commander.core.file_operations import FileOperations
+
         ops = FileOperations()
 
         def progress_callback(current: int, total: int, filename: str) -> bool:
@@ -40,11 +52,17 @@ class FileOperationWorker(QThread):
 
         try:
             if self.operation == "paste":
-                self._result = ops.paste(self.destination, progress_callback)
+                self._result = ops.paste(
+                    self.destination, progress_callback, self.conflict_resolution
+                )
             elif self.operation == "copy":
-                self._result = ops.copy(self.sources, self.destination, progress_callback)
+                self._result = ops.copy(
+                    self.sources, self.destination, progress_callback, self.conflict_resolution
+                )
             elif self.operation == "move":
-                self._result = ops.move(self.sources, self.destination, progress_callback)
+                self._result = ops.move(
+                    self.sources, self.destination, progress_callback, self.conflict_resolution
+                )
 
             self.finished.emit(self._result)
         except Exception as e:
@@ -58,21 +76,66 @@ class FileOperationWorker(QThread):
 class ProgressDialog(QDialog):
     """Dialog showing file operation progress."""
 
-    def __init__(self, operation: str, sources: list[Path], destination: Path, parent=None):
+    def __init__(
+        self,
+        operation: str,
+        sources: list[Path],
+        destination: Path,
+        parent=None,
+        conflict_resolution: ConflictResolution | None = None,
+    ):
         super().__init__(parent)
         self.operation = operation
         self.sources = sources
         self.destination = destination
         self._start_time = time.time()
         self._result = 0
+        self._conflict_resolution = conflict_resolution
 
         self._setup_ui()
-        self._start_operation()
 
-        op_name = {"copy": "Copying", "move": "Moving", "paste": "Pasting"}.get(operation, "Processing")
+        # Check for conflicts before starting if no resolution provided
+        if self._conflict_resolution is None:
+            self._check_conflicts_and_start()
+        else:
+            self._start_operation()
+
+        op_name = {"copy": "Copying", "move": "Moving", "paste": "Pasting"}.get(
+            operation, "Processing"
+        )
         self.setWindowTitle(f"{op_name} Files")
         self.setMinimumWidth(400)
         self.setModal(True)
+
+    def _check_conflicts_and_start(self) -> None:
+        """Check for conflicts and show dialog if needed."""
+        from commander.core.file_operations import FileOperations
+        from commander.widgets.conflict_dialog import ConflictDialog
+
+        ops = FileOperations()
+
+        # Find conflicts
+        if self.operation == "paste":
+            conflicts = ops.find_paste_conflicts(self.destination)
+        else:
+            conflicts = ops.find_conflicts(self.sources, self.destination)
+
+        if conflicts:
+            # Show conflict dialog
+            dialog = ConflictDialog(conflicts, self.parent())
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self._conflict_resolution = dialog.get_resolution()
+            else:
+                self._conflict_resolution = ConflictResolution.CANCEL
+        else:
+            # No conflicts, use default (rename for safety, though won't be needed)
+            self._conflict_resolution = ConflictResolution.RENAME
+
+        if self._conflict_resolution == ConflictResolution.CANCEL:
+            # User cancelled - close dialog immediately
+            QTimer.singleShot(0, self.reject)
+        else:
+            self._start_operation()
 
     def _setup_ui(self):
         """Setup UI."""
@@ -122,7 +185,10 @@ class ProgressDialog(QDialog):
 
     def _start_operation(self):
         """Start the file operation in background."""
-        self._worker = FileOperationWorker(self.operation, self.sources, self.destination)
+        resolution = self._conflict_resolution or ConflictResolution.RENAME
+        self._worker = FileOperationWorker(
+            self.operation, self.sources, self.destination, resolution
+        )
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_finished)
         self._worker.error.connect(self._on_error)
@@ -162,6 +228,7 @@ class ProgressDialog(QDialog):
     def _on_error(self, error: str):
         """Handle error."""
         from PySide6.QtWidgets import QMessageBox
+
         QMessageBox.critical(self, "Error", f"Operation failed: {error}")
         self.reject()
 
@@ -175,13 +242,14 @@ class ProgressDialog(QDialog):
         """Get the result (number of items processed)."""
         return self._result
 
-    def _format_size(self, size: int) -> str:
+    def _format_size(self, size: int | float) -> str:
         """Format size in human-readable format."""
+        size_f = float(size)
         for unit in ["B", "KB", "MB", "GB"]:
-            if size < 1024:
-                return f"{size:.1f} {unit}"
-            size /= 1024
-        return f"{size:.1f} TB"
+            if size_f < 1024:
+                return f"{size_f:.1f} {unit}"
+            size_f /= 1024
+        return f"{size_f:.1f} TB"
 
     def _format_time(self, seconds: float) -> str:
         """Format time in human-readable format."""

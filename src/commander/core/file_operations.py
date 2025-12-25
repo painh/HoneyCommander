@@ -1,13 +1,25 @@
 """File operations (copy, paste, delete, etc.)."""
 
+from __future__ import annotations
+
 import shutil
 import threading
 from pathlib import Path
 from typing import Callable
+from enum import Enum
 
 import send2trash
 
 from commander.core.undo_manager import get_undo_manager
+
+
+class ConflictResolution(Enum):
+    """Resolution options for file conflicts."""
+
+    SKIP = "skip"
+    OVERWRITE = "overwrite"
+    RENAME = "rename"  # Keep both (rename new file)
+    CANCEL = "cancel"
 
 
 class FileOperations:
@@ -49,12 +61,41 @@ class FileOperations:
         """Get clipboard contents and mode."""
         return self._clipboard.copy(), self._clipboard_mode
 
-    def paste(self, destination: Path, progress_callback: Callable[[int, int, str], bool] | None = None) -> int:
+    def find_conflicts(self, sources: list[Path], destination: Path) -> list[tuple[Path, Path]]:
+        """Find files that would conflict (already exist at destination).
+
+        Returns list of (source, existing_destination) tuples.
+        """
+        conflicts = []
+        for src in sources:
+            if not src.exists():
+                continue
+            dst = destination / src.name
+            if dst.exists():
+                conflicts.append((src, dst))
+        return conflicts
+
+    def find_paste_conflicts(self, destination: Path) -> list[tuple[Path, Path]]:
+        """Find conflicts for clipboard paste operation."""
+        if not self._clipboard:
+            return []
+        return self.find_conflicts(self._clipboard, destination)
+
+    def paste(
+        self,
+        destination: Path,
+        progress_callback: Callable[[int, int, str], bool] | None = None,
+        conflict_resolution: ConflictResolution = ConflictResolution.RENAME,
+    ) -> int:
         """Paste clipboard contents to destination.
 
         progress_callback(current, total, current_file) -> should_cancel
+        conflict_resolution: How to handle existing files
         """
         if not self._clipboard:
+            return 0
+
+        if conflict_resolution == ConflictResolution.CANCEL:
             return 0
 
         # Calculate total size for progress
@@ -82,7 +123,19 @@ class FileOperations:
                     continue
 
                 dst = destination / src.name
-                dst = self._get_unique_path(dst)
+
+                # Handle conflict based on resolution
+                if dst.exists():
+                    if conflict_resolution == ConflictResolution.SKIP:
+                        continue  # Skip this file
+                    elif conflict_resolution == ConflictResolution.OVERWRITE:
+                        # Delete existing file/folder before copying
+                        if dst.is_dir():
+                            shutil.rmtree(str(dst))
+                        else:
+                            dst.unlink()
+                    elif conflict_resolution == ConflictResolution.RENAME:
+                        dst = self._get_unique_path(dst)
 
                 if self._clipboard_mode == "cut":
                     if progress_callback:
@@ -129,7 +182,7 @@ class FileOperations:
         dst: Path,
         copied_size: int,
         total_size: int,
-        progress_callback: Callable[[int, int, str], bool] | None
+        progress_callback: Callable[[int, int, str], bool] | None,
     ) -> int:
         """Copy directory tree with progress reporting."""
         dst.mkdir(parents=True, exist_ok=True)
@@ -161,9 +214,17 @@ class FileOperations:
                 total += f.stat().st_size
         return total
 
-    def copy(self, sources: list[Path], destination: Path,
-             progress_callback: Callable[[int, int, str], bool] | None = None) -> int:
+    def copy(
+        self,
+        sources: list[Path],
+        destination: Path,
+        progress_callback: Callable[[int, int, str], bool] | None = None,
+        conflict_resolution: ConflictResolution = ConflictResolution.RENAME,
+    ) -> int:
         """Copy files to destination."""
+        if conflict_resolution == ConflictResolution.CANCEL:
+            return 0
+
         # Calculate total
         total_size = sum(self._get_size(s) for s in sources if s.exists())
         copied_size = 0
@@ -177,7 +238,18 @@ class FileOperations:
                     continue
 
                 dst = destination / src.name
-                dst = self._get_unique_path(dst)
+
+                # Handle conflict based on resolution
+                if dst.exists():
+                    if conflict_resolution == ConflictResolution.SKIP:
+                        continue
+                    elif conflict_resolution == ConflictResolution.OVERWRITE:
+                        if dst.is_dir():
+                            shutil.rmtree(str(dst))
+                        else:
+                            dst.unlink()
+                    elif conflict_resolution == ConflictResolution.RENAME:
+                        dst = self._get_unique_path(dst)
 
                 if src.is_dir():
                     copied_size = self._copytree_with_progress(
@@ -201,9 +273,17 @@ class FileOperations:
 
         return count
 
-    def move(self, sources: list[Path], destination: Path,
-             progress_callback: Callable[[int, int, str], bool] | None = None) -> int:
+    def move(
+        self,
+        sources: list[Path],
+        destination: Path,
+        progress_callback: Callable[[int, int, str], bool] | None = None,
+        conflict_resolution: ConflictResolution = ConflictResolution.RENAME,
+    ) -> int:
         """Move files to destination."""
+        if conflict_resolution == ConflictResolution.CANCEL:
+            return 0
+
         total_size = sum(self._get_size(s) for s in sources if s.exists())
         moved_size = 0
         count = 0
@@ -216,7 +296,18 @@ class FileOperations:
                     continue
 
                 dst = destination / src.name
-                dst = self._get_unique_path(dst)
+
+                # Handle conflict based on resolution
+                if dst.exists():
+                    if conflict_resolution == ConflictResolution.SKIP:
+                        continue
+                    elif conflict_resolution == ConflictResolution.OVERWRITE:
+                        if dst.is_dir():
+                            shutil.rmtree(str(dst))
+                        else:
+                            dst.unlink()
+                    elif conflict_resolution == ConflictResolution.RENAME:
+                        dst = self._get_unique_path(dst)
 
                 if progress_callback:
                     if progress_callback(moved_size, total_size, src.name):
