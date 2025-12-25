@@ -21,3 +21,12 @@ Thumbs.db
 
 # Build artifacts
 *.spec
+
+# Test files
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary files
+*.log
+*.tmp

@@ -3,7 +3,7 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QDir
+from PySide6.QtCore import Qt, QDir, QFileSystemWatcher
 from PySide6.QtWidgets import (
     QMainWindow,
     QSplitter,
@@ -33,6 +33,7 @@ from commander.widgets.favorites_panel import FavoritesPanel
 from commander.core.file_operations import FileOperations
 from commander.core.undo_manager import get_undo_manager
 from commander.utils.settings import Settings
+from commander.utils.i18n import tr
 
 
 class MainWindow(QMainWindow):
@@ -46,6 +47,10 @@ class MainWindow(QMainWindow):
         self._history_index: int = 0
         self._file_ops = FileOperations()
 
+        # File system watcher for external changes
+        self._watcher = QFileSystemWatcher()
+        self._watcher.directoryChanged.connect(self._on_directory_changed)
+
         self._setup_toolbar()
         self._setup_ui()
         self._setup_menu()
@@ -53,7 +58,7 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._load_settings()
 
-        self.setWindowTitle("꿀 커맨더")
+        self.setWindowTitle(tr("app_name"))
 
     def _setup_ui(self):
         """Setup the main UI layout."""
@@ -108,31 +113,31 @@ class MainWindow(QMainWindow):
         menubar = self.menuBar()
 
         # File menu
-        file_menu = menubar.addMenu("File")
+        file_menu = menubar.addMenu(tr("menu_file"))
 
-        new_folder_action = QAction("New Folder", self)
+        new_folder_action = QAction(tr("new_folder"), self)
         new_folder_action.setShortcut(QKeySequence("Ctrl+Shift+N"))
         new_folder_action.triggered.connect(self._create_new_folder)
         file_menu.addAction(new_folder_action)
 
         file_menu.addSeparator()
 
-        exit_action = QAction("Exit", self)
+        exit_action = QAction(tr("exit"), self)
         exit_action.setShortcut(QKeySequence("Ctrl+Q"))
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
         # Edit menu
-        edit_menu = menubar.addMenu("Edit")
+        edit_menu = menubar.addMenu(tr("menu_edit"))
 
         # Undo/Redo
-        self._undo_action = QAction("Undo", self)
+        self._undo_action = QAction(tr("undo"), self)
         self._undo_action.setShortcut(QKeySequence.StandardKey.Undo)
         self._undo_action.triggered.connect(self._undo)
         self._undo_action.setEnabled(False)
         edit_menu.addAction(self._undo_action)
 
-        self._redo_action = QAction("Redo", self)
+        self._redo_action = QAction(tr("redo"), self)
         self._redo_action.setShortcut(QKeySequence.StandardKey.Redo)
         self._redo_action.triggered.connect(self._redo)
         self._redo_action.setEnabled(False)
@@ -140,49 +145,96 @@ class MainWindow(QMainWindow):
 
         edit_menu.addSeparator()
 
-        self._copy_action = QAction("Copy", self)
+        self._copy_action = QAction(tr("copy"), self)
         self._copy_action.setShortcut(QKeySequence.StandardKey.Copy)
         self._copy_action.triggered.connect(self._copy_selected)
         edit_menu.addAction(self._copy_action)
 
-        self._cut_action = QAction("Cut", self)
+        self._cut_action = QAction(tr("cut"), self)
         self._cut_action.setShortcut(QKeySequence.StandardKey.Cut)
         self._cut_action.triggered.connect(self._cut_selected)
         edit_menu.addAction(self._cut_action)
 
-        self._paste_action = QAction("Paste", self)
+        self._paste_action = QAction(tr("paste"), self)
         self._paste_action.setShortcut(QKeySequence.StandardKey.Paste)
         self._paste_action.triggered.connect(self._paste)
         edit_menu.addAction(self._paste_action)
 
         edit_menu.addSeparator()
 
-        self._delete_action = QAction("Delete", self)
+        self._delete_action = QAction(tr("delete"), self)
         self._delete_action.setShortcut(QKeySequence.StandardKey.Delete)
         self._delete_action.triggered.connect(self._delete_selected)
         edit_menu.addAction(self._delete_action)
 
-        self._rename_action = QAction("Rename", self)
+        self._rename_action = QAction(tr("rename"), self)
         self._rename_action.setShortcut(QKeySequence("F2"))
         self._rename_action.triggered.connect(self._rename_selected)
         edit_menu.addAction(self._rename_action)
 
         # View menu
-        view_menu = menubar.addMenu("View")
+        view_menu = menubar.addMenu(tr("menu_view"))
 
-        self._list_view_action = QAction("List", self)
+        self._list_view_action = QAction(tr("view_list"), self)
         self._list_view_action.triggered.connect(lambda: self._file_list.set_view_mode("list"))
         view_menu.addAction(self._list_view_action)
 
-        self._icon_view_action = QAction("Icons", self)
+        self._icon_view_action = QAction(tr("view_icons"), self)
         self._icon_view_action.triggered.connect(lambda: self._file_list.set_view_mode("icons"))
         view_menu.addAction(self._icon_view_action)
 
-        self._thumb_view_action = QAction("Thumbnails", self)
+        self._thumb_view_action = QAction(tr("view_thumbnails"), self)
         self._thumb_view_action.triggered.connect(
             lambda: self._file_list.set_view_mode("thumbnails")
         )
         view_menu.addAction(self._thumb_view_action)
+
+        # Settings action (goes to app menu on macOS automatically)
+        settings_action = QAction(tr("settings") + "...", self)
+        settings_action.setShortcut(QKeySequence.StandardKey.Preferences)
+        settings_action.setMenuRole(QAction.MenuRole.PreferencesRole)
+        settings_action.triggered.connect(self._show_settings)
+        # Add to Edit menu for cross-platform consistency
+        edit_menu.addSeparator()
+        edit_menu.addAction(settings_action)
+
+        # Help menu
+        help_menu = menubar.addMenu(tr("menu_help"))
+
+        shortcuts_action = QAction(tr("shortcuts") + "...", self)
+        shortcuts_action.setShortcut(QKeySequence("F1"))
+        shortcuts_action.triggered.connect(self._show_shortcuts)
+        help_menu.addAction(shortcuts_action)
+
+        help_menu.addSeparator()
+
+        about_action = QAction(tr("about"), self)
+        about_action.setMenuRole(QAction.MenuRole.AboutRole)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
+
+    def _show_settings(self):
+        """Show settings dialog."""
+        from commander.widgets.settings_dialog import SettingsDialog
+        dialog = SettingsDialog(self)
+        dialog.exec()
+
+    def _show_shortcuts(self):
+        """Show keyboard shortcuts dialog."""
+        from commander.widgets.shortcuts_dialog import ShortcutsDialog
+        dialog = ShortcutsDialog(self)
+        dialog.exec()
+
+    def _show_about(self):
+        """Show about dialog."""
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.about(
+            self,
+            tr("about"),
+            f"<h2>{tr('app_name')}</h2>"
+            f"<p>{tr('about_description')}</p>"
+            f"<p>{tr('about_version')}: 1.0.0</p>"
+        )
 
     def _setup_toolbar(self):
         """Setup navigation toolbar."""
@@ -235,6 +287,21 @@ class MainWindow(QMainWindow):
         # Alt+Right: Forward
         forward_shortcut = QShortcut(QKeySequence("Alt+Right"), self)
         forward_shortcut.activated.connect(self._go_forward)
+
+        # Cmd+Up (macOS) / Ctrl+Up: Go to parent folder
+        # Note: On macOS, Qt maps Cmd key to Ctrl (not Meta)
+        up_shortcut = QShortcut(QKeySequence("Ctrl+Up"), self)
+        down_shortcut = QShortcut(QKeySequence("Ctrl+Down"), self)
+        up_shortcut.activated.connect(self._go_up)
+
+        # Cmd+Down (macOS) / Ctrl+Down: Open selected item
+        down_shortcut.activated.connect(self._open_selected)
+
+    def _open_selected(self):
+        """Open selected item (folder or file)."""
+        paths = self._file_list.get_selected_paths()
+        if paths:
+            self._on_item_activated(paths[0])
 
     def _focus_address_bar(self):
         """Focus and select address bar text."""
@@ -346,6 +413,11 @@ class MainWindow(QMainWindow):
         if not path.exists() or not path.is_dir():
             return
 
+        # Update file system watcher
+        if self._watcher.directories():
+            self._watcher.removePaths(self._watcher.directories())
+        self._watcher.addPath(str(path))
+
         self._current_path = path
         self._address_bar.set_path(path)
         self._file_list.set_root_path(path)
@@ -367,14 +439,27 @@ class MainWindow(QMainWindow):
 
     def _on_item_activated(self, path: Path):
         """Handle file list item double-click."""
+        import subprocess
         from commander.core.archive_handler import ArchiveManager
 
-        if path.is_dir():
+        # Check for macOS app bundle (.app is a directory but should be launched)
+        is_app_bundle = sys.platform == "darwin" and path.suffix.lower() == ".app"
+
+        if path.is_dir() and not is_app_bundle:
             self._navigate_to(path)
         elif ArchiveManager.is_archive(path):
             self._open_archive(path)
         elif self._is_image(path):
             self._open_image_viewer(path)
+        else:
+            # Open with system default app
+            if sys.platform == "darwin":
+                subprocess.run(["open", str(path)])
+            elif sys.platform == "win32":
+                import os
+                os.startfile(str(path))
+            else:
+                subprocess.run(["xdg-open", str(path)])
 
     def _on_item_selected(self, path: Path):
         """Handle file list item selection."""
@@ -438,6 +523,13 @@ class MainWindow(QMainWindow):
     def _refresh(self):
         """Refresh current view."""
         self._file_list.set_root_path(self._current_path)
+        self._update_status()
+
+    def _on_directory_changed(self, path: str):
+        """Handle external directory changes."""
+        # Check if it's the current directory
+        if Path(path) == self._current_path:
+            self._refresh()
 
     def _update_nav_buttons(self):
         """Update navigation button states."""

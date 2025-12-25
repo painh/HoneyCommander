@@ -203,12 +203,16 @@ class FileListView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # Set focus policy for the container
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
         self._stack = QStackedWidget()
         layout.addWidget(self._stack)
 
         # Tree view for list mode (with columns)
         self._tree_view = DropEnabledTreeView()
         self._tree_view.setModel(self._model)
+        self._tree_view.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._tree_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._tree_view.setDragEnabled(True)
         self._tree_view.setDropIndicatorShown(True)
@@ -236,6 +240,7 @@ class FileListView(QWidget):
         # List view for icons/thumbnails mode
         self._list_view = DropEnabledListView()
         self._list_view.setModel(self._model)
+        self._list_view.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._list_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._list_view.setDragEnabled(True)
         self._list_view.setDropIndicatorShown(True)
@@ -260,6 +265,11 @@ class FileListView(QWidget):
         """Get the current active view."""
         return self._stack.currentWidget()
 
+    def focusInEvent(self, event):
+        """Forward focus to the current view."""
+        super().focusInEvent(event)
+        self._current_view().setFocus()
+
     def set_root_path(self, path: Path):
         """Set the directory to display."""
         self._current_path = path
@@ -278,19 +288,21 @@ class FileListView(QWidget):
 
     def _connect_selection_signals(self):
         """Connect selection changed signals for both views."""
-        # Tree view
+        # Tree view - disconnect then reconnect
+        tree_selection_model = self._tree_view.selectionModel()
         try:
-            self._tree_view.selectionModel().selectionChanged.disconnect(self._on_selection_changed)
+            tree_selection_model.selectionChanged.disconnect(self._on_selection_changed)
         except (RuntimeError, TypeError):
             pass
-        self._tree_view.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        tree_selection_model.selectionChanged.connect(self._on_selection_changed)
 
-        # List view
+        # List view - disconnect then reconnect
+        list_selection_model = self._list_view.selectionModel()
         try:
-            self._list_view.selectionModel().selectionChanged.disconnect(self._on_selection_changed)
+            list_selection_model.selectionChanged.disconnect(self._on_selection_changed)
         except (RuntimeError, TypeError):
             pass
-        self._list_view.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        list_selection_model.selectionChanged.connect(self._on_selection_changed)
 
     def set_view_mode(self, mode: str):
         """Change view mode (list, icons, thumbnails)."""

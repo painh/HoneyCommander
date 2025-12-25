@@ -140,3 +140,12 @@ class Settings:
     def load_preview_visible(self) -> bool:
         """Load preview panel visibility."""
         return self._settings.value("view/preview_visible", True, type=bool)
+
+    # Language
+    def save_language(self, lang: str):
+        """Save language setting."""
+        self._settings.setValue("general/language", lang)
+
+    def load_language(self) -> str | None:
+        """Load language setting. Returns None if not set (use system default)."""
+        return self._settings.value("general/language")
