@@ -6,6 +6,10 @@
 ![PySide6](https://img.shields.io/badge/PySide6-Qt6-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
+## 다운로드
+
+[GitHub Releases](https://github.com/painh/HoneyCommander/releases)에서 빌드된 앱을 다운로드할 수 있습니다.
+
 ## 주요 기능
 
 - **3단 레이아웃**: 폴더 트리 | 파일 목록 | 미리보기
@@ -61,10 +65,6 @@ uv run commander
 ## 스크린샷
 
 <!-- TODO: 스크린샷 추가 -->
-
-## 릴리즈
-
-[GitHub Releases](https://github.com/painh/HoneyCommander/releases)에서 빌드된 앱을 다운로드할 수 있습니다.
 
 ## 라이선스
 
