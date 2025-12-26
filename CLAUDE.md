@@ -24,6 +24,12 @@ uv run python scripts/build_pyinstaller.py
 2. Push only when explicitly requested
 3. Update this file when workflow changes
 
+## Versioning
+- **Always ask user** how much to bump version (patch/minor/major)
+- Don't jump versions too much (e.g., 0.0.1 -> 0.1.0 is too big)
+- Version is in `src/commander/__init__.py`
+- Tag must match version (e.g., v0.0.2 for __version__ = "0.0.2")
+
 ## Project Structure
 ```
 src/commander/
