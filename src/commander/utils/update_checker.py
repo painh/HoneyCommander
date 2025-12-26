@@ -6,6 +6,8 @@ import urllib.error
 from typing import Optional
 from dataclasses import dataclass
 
+from PySide6.QtCore import QObject, Signal
+
 from commander import __version__
 
 GITHUB_REPO = "painh/HoneyCommander"
@@ -110,37 +112,43 @@ def check_for_updates() -> Optional[ReleaseInfo]:
         return None
 
 
+class _UpdateSignaler(QObject):
+    """Helper class to emit signal from background thread to main thread."""
+
+    update_result = Signal(object)
+
+
+# Global signaler instance (created once, reused)
+_signaler: Optional[_UpdateSignaler] = None
+
+
 def check_for_updates_async(callback):
     """
     Check for updates in a background thread.
 
     Args:
         callback: Function to call with ReleaseInfo or None
+
+    Returns:
+        The thread object (caller should keep a reference to prevent GC)
     """
-    from PySide6.QtCore import QThread, Signal, QObject
-    from typing import Any
+    import threading
 
-    class UpdateWorker(QObject):
-        finished = Signal(object)
+    global _signaler
+    if _signaler is None:
+        _signaler = _UpdateSignaler()
 
-        def run(self):
-            result = check_for_updates()
-            self.finished.emit(result)
+    # Disconnect previous connections and connect new callback
+    try:
+        _signaler.update_result.disconnect()
+    except RuntimeError:
+        pass  # No connections to disconnect
+    _signaler.update_result.connect(callback)
 
-    class UpdateThread(QThread):
-        worker_ref: Any  # Store worker to prevent GC
+    def worker():
+        result = check_for_updates()
+        _signaler.update_result.emit(result)
 
-        def __init__(self, worker: UpdateWorker):
-            super().__init__()
-            self.worker_ref = worker
-
-        def run(self):
-            self.worker_ref.run()
-
-    worker = UpdateWorker()
-    thread = UpdateThread(worker)
-    worker.finished.connect(callback)
-    worker.finished.connect(thread.quit)
-
+    thread = threading.Thread(target=worker, daemon=True)
     thread.start()
     return thread

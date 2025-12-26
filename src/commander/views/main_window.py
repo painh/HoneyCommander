@@ -719,13 +719,14 @@ class MainWindow(QMainWindow):
 
     def _update_window_title(self):
         """Update window title with version info."""
-        from commander import __version__, __build_date__
+        from commander import __version__, get_build_date
 
         title = tr("app_name")
         if __version__:
             title += f" v{__version__}"
-        if __build_date__:
-            title += f" ({__build_date__})"
+        build_date = get_build_date()
+        if build_date:
+            title += f" ({build_date})"
         self.setWindowTitle(title)
 
     def _open_new_window(self):
