@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QGroupBox,
 )
-from PySide6.QtGui import QPixmap, QIcon
 
 
 class InfoDialog(QDialog):

@@ -3,9 +3,9 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QDir, QModelIndex, QUrl, QMimeData
+from PySide6.QtCore import Qt, Signal, QDir, QModelIndex
 from PySide6.QtWidgets import QTreeView, QFileSystemModel, QAbstractItemView
-from PySide6.QtGui import QDragEnterEvent, QDropEvent, QDrag
+from PySide6.QtGui import QDragEnterEvent, QDropEvent
 
 
 class FolderTreeView(QTreeView):

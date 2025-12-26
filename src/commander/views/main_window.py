@@ -3,27 +3,19 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QDir, QFileSystemWatcher
+from PySide6.QtCore import Qt, QFileSystemWatcher
 from PySide6.QtWidgets import (
     QMainWindow,
     QSplitter,
     QWidget,
     QVBoxLayout,
-    QHBoxLayout,
     QToolBar,
-    QLineEdit,
     QPushButton,
     QStatusBar,
-    QTreeView,
-    QListView,
-    QLabel,
-    QFileSystemModel,
-    QAbstractItemView,
-    QMenu,
     QInputDialog,
     QDialog,
 )
-from PySide6.QtGui import QAction, QKeySequence, QIcon, QShortcut
+from PySide6.QtGui import QAction, QKeySequence, QShortcut
 
 from commander.views.folder_tree import FolderTreeView
 from commander.views.file_list import FileListView
@@ -636,7 +628,6 @@ class MainWindow(QMainWindow):
 
     def _create_new_folder(self):
         """Create a new folder."""
-        from PySide6.QtWidgets import QInputDialog
 
         name, ok = QInputDialog.getText(self, "New Folder", "Folder name:")
         if ok and name:

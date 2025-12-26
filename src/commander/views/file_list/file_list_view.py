@@ -38,7 +38,7 @@ from commander.views.file_list.thumbnail_delegate import ThumbnailDelegate
 from commander.utils.settings import Settings
 
 if TYPE_CHECKING:
-    from PySide6.QtGui import QDragEnterEvent, QDropEvent
+    pass
 
 
 class ViewMode(Enum):

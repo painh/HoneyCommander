@@ -1,11 +1,9 @@
 """Thumbnail provider with caching."""
 
-import hashlib
 from pathlib import Path
-from typing import Callable
 
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QObject
-from PySide6.QtGui import QPixmap, QImage
+from PySide6.QtGui import QPixmap
 
 from commander.core.image_loader import load_pixmap, ALL_IMAGE_FORMATS
 from commander.utils.settings import Settings

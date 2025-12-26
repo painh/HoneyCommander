@@ -2,7 +2,6 @@
 
 import fnmatch
 from pathlib import Path
-from typing import Generator
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
@@ -16,7 +15,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QCheckBox,
     QSplitter,
-    QWidget,
 )
 
 from commander.views.preview_panel import PreviewPanel

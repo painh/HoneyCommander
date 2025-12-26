@@ -3,8 +3,7 @@
 from pathlib import Path
 from io import BytesIO
 
-from PySide6.QtCore import Qt, QObject, Signal, QThread, QSize
-from PySide6.QtWidgets import QWidget, QLabel, QHBoxLayout, QScrollArea
+from PySide6.QtCore import QObject, Signal, QThread
 from PySide6.QtGui import QPixmap, QMovie
 
 from commander.utils.settings import Settings

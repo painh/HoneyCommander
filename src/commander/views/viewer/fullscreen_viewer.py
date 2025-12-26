@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, Signal, QSize, QPoint
 from PySide6.QtWidgets import (
@@ -30,7 +29,7 @@ from PySide6.QtGui import (
 
 from commander.core.image_loader import load_pixmap, ALL_IMAGE_FORMATS
 from commander.utils.settings import Settings
-from commander.views.viewer.animation_controller import AnimationController, ThumbnailWorker
+from commander.views.viewer.animation_controller import AnimationController
 
 
 class FullscreenImageViewer(QWidget):

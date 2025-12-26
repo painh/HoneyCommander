@@ -3,9 +3,9 @@
 from pathlib import Path
 from io import BytesIO
 
-from PySide6.QtGui import QPixmap, QImage
+from PySide6.QtGui import QPixmap
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtCore import QByteArray, Qt
+from PySide6.QtCore import Qt
 from PIL import Image
 
 

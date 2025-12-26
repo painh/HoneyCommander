@@ -5,7 +5,6 @@ import threading
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Callable
 
 import send2trash
 

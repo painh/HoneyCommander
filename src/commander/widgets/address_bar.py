@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLineEdit, QPushButton, QStyle
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QLineEdit, QPushButton
 
 from commander.utils.settings import Settings
 

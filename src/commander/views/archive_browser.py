@@ -1,15 +1,13 @@
 """Archive browser window."""
 
 from pathlib import Path
-from io import BytesIO
 
-from PySide6.QtCore import Qt, QAbstractItemModel, QModelIndex, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
     QSplitter,
-    QTreeView,
     QListWidget,
     QListWidgetItem,
     QLabel,
@@ -19,7 +17,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QWidget,
 )
-from PySide6.QtGui import QPixmap, QIcon
+from PySide6.QtGui import QPixmap
 
 from commander.core.archive_handler import ArchiveManager, ArchiveHandler, ArchiveEntry
 from commander.core.image_loader import ALL_IMAGE_FORMATS

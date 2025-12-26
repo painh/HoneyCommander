@@ -5,8 +5,6 @@ from pathlib import Path
 from zipfile import ZipFile
 from datetime import datetime
 from dataclasses import dataclass
-from typing import Iterator
-import io
 
 try:
     import rarfile

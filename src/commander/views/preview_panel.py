@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QComboBox,
 )
-from PySide6.QtGui import QPixmap
 
 from commander.core.image_loader import load_pixmap, ALL_IMAGE_FORMATS
 from commander.utils.i18n import tr

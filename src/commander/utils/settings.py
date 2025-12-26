@@ -1,7 +1,6 @@
 """Application settings management."""
 
 from pathlib import Path
-from typing import Any
 
 from PySide6.QtCore import QSettings
 
