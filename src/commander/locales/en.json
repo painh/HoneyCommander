@@ -150,5 +150,11 @@
   "shortcut_select_image": "Select image",
   "shortcut_open_in_explorer": "Show in file manager",
   "shortcut_copy_clipboard": "Copy to clipboard",
-  "shortcut_open_editor": "Open in editor"
+  "shortcut_open_editor": "Open in editor",
+
+  "update_available": "Update Available",
+  "new_version_available": "A new version is available",
+  "update_download_prompt": "Would you like to go to the download page?",
+  "download": "Download",
+  "later": "Later"
 }
