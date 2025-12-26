@@ -83,7 +83,5 @@ class AddressBar(QWidget):
         else:
             # Empty star (not favorite)
             self._star_btn.setText("☆")
-            self._star_btn.setStyleSheet(
-                "QPushButton { color: gray; font-size: 18px; }"
-            )
+            self._star_btn.setStyleSheet("QPushButton { color: gray; font-size: 18px; }")
             self._star_btn.setToolTip("Add to favorites")

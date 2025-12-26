@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 try:
     import rarfile
+
     HAS_RARFILE = True
 except ImportError:
     HAS_RARFILE = False
@@ -16,6 +17,7 @@ except ImportError:
 @dataclass
 class ArchiveEntry:
     """Entry in an archive file."""
+
     name: str
     path: str
     is_dir: bool
@@ -111,7 +113,7 @@ class ZipHandler(ArchiveHandler):
             if internal_path:
                 if not path.startswith(internal_path + "/"):
                     continue
-                relative = path[len(internal_path) + 1:]
+                relative = path[len(internal_path) + 1 :]
             else:
                 relative = path
 
@@ -195,7 +197,7 @@ class RarHandler(ArchiveHandler):
             if internal_path:
                 if not path.startswith(internal_path + "/"):
                     continue
-                relative = path[len(internal_path) + 1:]
+                relative = path[len(internal_path) + 1 :]
             else:
                 relative = path
 

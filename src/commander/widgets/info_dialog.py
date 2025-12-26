@@ -86,7 +86,7 @@ class InfoDialog(QDialog):
             stat = self._path.stat()
 
             # Created
-            if hasattr(stat, 'st_birthtime'):
+            if hasattr(stat, "st_birthtime"):
                 created = datetime.fromtimestamp(stat.st_birthtime)
             else:
                 created = datetime.fromtimestamp(stat.st_ctime)
@@ -112,6 +112,7 @@ class InfoDialog(QDialog):
 
             try:
                 import stat as stat_module
+
                 mode = self._path.stat().st_mode
 
                 perms = ""

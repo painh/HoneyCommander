@@ -40,7 +40,7 @@ class I18n:
             return locales_dir
 
         # Fallback for frozen apps (PyInstaller)
-        if getattr(sys, 'frozen', False):
+        if getattr(sys, "frozen", False):
             locales_dir = Path(sys._MEIPASS) / "commander" / "locales"
             if locales_dir.exists():
                 return locales_dir
@@ -73,6 +73,7 @@ class I18n:
     def _load_language(self):
         """Load language from settings or detect from system."""
         from commander.utils.settings import Settings
+
         settings = Settings()
         saved_lang = settings.load_language()
         if saved_lang and saved_lang in self.SUPPORTED_LANGUAGES:
@@ -88,15 +89,18 @@ class I18n:
             if sys.platform == "darwin":
                 # macOS: use defaults command
                 import subprocess
+
                 result = subprocess.run(
-                    ["defaults", "read", "-g", "AppleLanguages"],
-                    capture_output=True, text=True
+                    ["defaults", "read", "-g", "AppleLanguages"], capture_output=True, text=True
                 )
                 if result.returncode == 0:
                     # Parse output like "(\n    ko,\n    en\n)"
                     output = result.stdout
                     for lang in self.SUPPORTED_LANGUAGES:
-                        if lang.lower() in output.lower() or lang.replace("_", "-").lower() in output.lower():
+                        if (
+                            lang.lower() in output.lower()
+                            or lang.replace("_", "-").lower() in output.lower()
+                        ):
                             self._language = lang
                             return
                     # Check for language variants

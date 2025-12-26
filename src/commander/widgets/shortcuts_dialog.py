@@ -57,68 +57,98 @@ class ShortcutsDialog(QDialog):
         delete = _del()
 
         # File Explorer shortcuts
-        self._add_section(content_layout, tr("shortcut_section_navigation"), [
-            (f"{mod}+L", tr("shortcut_focus_address")),
-            ("F3", tr("shortcut_search")),
-            ("F5", tr("shortcut_refresh")),
-            ("⌫" if sys.platform == "darwin" else "Backspace", tr("shortcut_go_up")),
-            (f"{mod}+↑", tr("shortcut_go_up")),
-            (f"{mod}+↓", tr("shortcut_open_item")),
-            (f"{alt}+←", tr("shortcut_go_back")),
-            (f"{alt}+→", tr("shortcut_go_forward")),
-        ])
+        self._add_section(
+            content_layout,
+            tr("shortcut_section_navigation"),
+            [
+                (f"{mod}+L", tr("shortcut_focus_address")),
+                ("F3", tr("shortcut_search")),
+                ("F5", tr("shortcut_refresh")),
+                ("⌫" if sys.platform == "darwin" else "Backspace", tr("shortcut_go_up")),
+                (f"{mod}+↑", tr("shortcut_go_up")),
+                (f"{mod}+↓", tr("shortcut_open_item")),
+                (f"{alt}+←", tr("shortcut_go_back")),
+                (f"{alt}+→", tr("shortcut_go_forward")),
+            ],
+        )
 
-        self._add_section(content_layout, tr("shortcut_section_file_ops"), [
-            (f"{mod}+C", tr("copy")),
-            (f"{mod}+X", tr("cut")),
-            (f"{mod}+V", tr("paste")),
-            (delete, tr("delete")),
-            ("F2", tr("rename")),
-            (f"{mod}+⇧+N", tr("new_folder")),
-            (f"{mod}+Z", tr("undo")),
-            (f"{mod}+⇧+Z", tr("redo")),
-        ])
+        self._add_section(
+            content_layout,
+            tr("shortcut_section_file_ops"),
+            [
+                (f"{mod}+C", tr("copy")),
+                (f"{mod}+X", tr("cut")),
+                (f"{mod}+V", tr("paste")),
+                (delete, tr("delete")),
+                ("F2", tr("rename")),
+                (f"{mod}+⇧+N", tr("new_folder")),
+                (f"{mod}+Z", tr("undo")),
+                (f"{mod}+⇧+Z", tr("redo")),
+            ],
+        )
 
         # Image Viewer shortcuts
-        self._add_section(content_layout, tr("shortcut_section_viewer_nav"), [
-            ("←, ⌫, PageUp" if sys.platform == "darwin" else "←, Backspace, PageUp", tr("prev_image")),
-            ("→, Space, PageDown", tr("next_image")),
-            ("[", tr("prev_folder")),
-            ("]", tr("next_folder")),
-            ("Home", tr("shortcut_first_image")),
-            ("End", tr("shortcut_last_image")),
-            (tr("shortcut_mouse_wheel"), tr("shortcut_prev_next")),
-        ])
+        self._add_section(
+            content_layout,
+            tr("shortcut_section_viewer_nav"),
+            [
+                (
+                    "←, ⌫, PageUp" if sys.platform == "darwin" else "←, Backspace, PageUp",
+                    tr("prev_image"),
+                ),
+                ("→, Space, PageDown", tr("next_image")),
+                ("[", tr("prev_folder")),
+                ("]", tr("next_folder")),
+                ("Home", tr("shortcut_first_image")),
+                ("End", tr("shortcut_last_image")),
+                (tr("shortcut_mouse_wheel"), tr("shortcut_prev_next")),
+            ],
+        )
 
-        self._add_section(content_layout, tr("shortcut_section_viewer_zoom"), [
-            ("0, 1", tr("original_size")),
-            ("9", tr("fit_to_screen")),
-            ("+, =", tr("zoom_in")),
-            ("-", tr("zoom_out")),
-            (tr("shortcut_middle_click"), tr("fit_to_screen")),
-        ])
+        self._add_section(
+            content_layout,
+            tr("shortcut_section_viewer_zoom"),
+            [
+                ("0, 1", tr("original_size")),
+                ("9", tr("fit_to_screen")),
+                ("+, =", tr("zoom_in")),
+                ("-", tr("zoom_out")),
+                (tr("shortcut_middle_click"), tr("fit_to_screen")),
+            ],
+        )
 
-        self._add_section(content_layout, tr("shortcut_section_viewer_transform"), [
-            ("R", tr("rotate_cw")),
-            ("⇧+R", tr("rotate_ccw")),
-            ("H", tr("flip_h")),
-            ("V", tr("flip_v")),
-            ("U", tr("shortcut_filter_off")),
-            ("S", tr("shortcut_filter_smooth")),
-        ])
+        self._add_section(
+            content_layout,
+            tr("shortcut_section_viewer_transform"),
+            [
+                ("R", tr("rotate_cw")),
+                ("⇧+R", tr("rotate_ccw")),
+                ("H", tr("flip_h")),
+                ("V", tr("flip_v")),
+                ("U", tr("shortcut_filter_off")),
+                ("S", tr("shortcut_filter_smooth")),
+            ],
+        )
 
-        self._add_section(content_layout, tr("shortcut_section_viewer_file"), [
-            ("F2", tr("shortcut_open_file")),
-            ("F", tr("shortcut_open_folder")),
-            ("F4, Esc, X", tr("shortcut_close_viewer")),
-            ("Enter ↩" if sys.platform == "darwin" else "Enter", tr("shortcut_select_image")),
-            (f"{mod}+↩" if sys.platform == "darwin" else f"{mod}+Enter", tr("shortcut_open_in_explorer")),
-            ("Tab ⇥", tr("file_info")),
-            (delete, tr("delete_file")),
-            (f"{mod}+C", tr("shortcut_copy_clipboard")),
-            (f"{mod}+E", tr("shortcut_open_editor")),
-            ("Insert", tr("copy_to_photos") + " (macOS)"),
-        ])
+        self._add_section(
+            content_layout,
+            tr("shortcut_section_viewer_file"),
+            [
+                ("F2", tr("shortcut_open_file")),
+                ("F", tr("shortcut_open_folder")),
+                ("F4, Esc, X", tr("shortcut_close_viewer")),
+                ("Enter ↩" if sys.platform == "darwin" else "Enter", tr("shortcut_select_image")),
+                (
+                    f"{mod}+↩" if sys.platform == "darwin" else f"{mod}+Enter",
+                    tr("shortcut_open_in_explorer"),
+                ),
+                ("Tab ⇥", tr("file_info")),
+                (delete, tr("delete_file")),
+                (f"{mod}+C", tr("shortcut_copy_clipboard")),
+                (f"{mod}+E", tr("shortcut_open_editor")),
+                ("Insert", tr("copy_to_photos") + " (macOS)"),
+            ],
+        )
 
         content_layout.addStretch()
         scroll.setWidget(content)

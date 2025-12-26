@@ -61,9 +61,7 @@ class FavoritesPanel(QWidget):
         item.setText(path.name or str(path))
         item.setToolTip(str(path))
         item.setData(Qt.ItemDataRole.UserRole, path)
-        item.setIcon(self.style().standardIcon(
-            self.style().StandardPixmap.SP_DirIcon
-        ))
+        item.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_DirIcon))
         self._list.addItem(item)
 
     def _on_item_clicked(self, item: QListWidgetItem):
