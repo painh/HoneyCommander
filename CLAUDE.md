@@ -14,6 +14,11 @@ Cross-platform file explorer with image viewer (like HoneyView + Windows Explore
 # Run the app
 uv run commander
 
+# Run tests, lint, format (ALWAYS run before push!)
+uv run ruff format src/
+uv run ruff check src/
+uv run pytest tests/
+
 # Build (after installing pyinstaller)
 uv add pyinstaller --optional build
 uv run python scripts/build_pyinstaller.py
