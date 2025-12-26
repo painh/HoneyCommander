@@ -69,12 +69,15 @@ class WindowManager:
         """Create a new window, optionally at a specific path."""
         _logger.info(f"Creating new window at path: {path}")
         try:
+            _logger.debug("About to create MainWindow instance...")
             window = MainWindow()
-            _logger.debug("MainWindow created")
+            _logger.debug("MainWindow instance created")
             if path and path.exists() and path.is_dir():
                 window._navigate_to(path)
                 _logger.debug(f"Navigated to path: {path}")
+            _logger.debug("Connecting destroyed signal...")
             window.destroyed.connect(lambda: self._on_window_destroyed(window))
+            _logger.debug("Adding window to list...")
             self._windows.append(window)
             _logger.info(f"Window created successfully. Total windows: {len(self._windows)}")
             return window
@@ -245,13 +248,15 @@ def main():
     # Default: open main window
     _logger.info("Opening default main window...")
     window = wm.create_window()
-    _logger.info("Showing window...")
+    _logger.info("create_window returned, about to call show()...")
     window.show()
-    _logger.info("Window shown successfully")
+    _logger.info("show() completed, window should be visible")
     app._started = True
 
-    _logger.info("Starting Qt event loop...")
-    sys.exit(app.exec())
+    _logger.info("Starting Qt event loop (app.exec())...")
+    result = app.exec()
+    _logger.info(f"Qt event loop ended with result: {result}")
+    sys.exit(result)
 
 
 if __name__ == "__main__":

@@ -63,11 +63,13 @@ class MainWindow(QMainWindow):
         _logger.debug("Checking for updates...")
         self._check_for_updates()
 
+        _logger.debug("Updating window title...")
         self._update_window_title()
-        _logger.info("MainWindow.__init__ completed")
+        _logger.debug("Window title updated")
 
         # Keep reference to update thread
         self._update_thread = None
+        _logger.info("MainWindow.__init__ completed, about to return")
 
     def _setup_ui(self):
         """Setup the main UI layout."""
@@ -672,7 +674,11 @@ class MainWindow(QMainWindow):
 
     def _check_for_updates(self):
         """Check for updates in background (silent)."""
-        self._update_thread = check_for_updates_async(self._on_update_check_complete)
+        try:
+            self._update_thread = check_for_updates_async(self._on_update_check_complete)
+            _logger.debug("Update check thread started")
+        except Exception as e:
+            _logger.error(f"Failed to start update check: {e}", exc_info=True)
 
     def _manual_check_for_updates(self):
         """Manually check for updates (shows result even if up to date)."""
