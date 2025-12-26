@@ -345,6 +345,9 @@ class MainWindow(QMainWindow):
         # Folder tree selection -> file list update
         self._folder_tree.folder_selected.connect(self._on_folder_selected)
 
+        # Folder tree drag and drop
+        self._folder_tree.files_dropped.connect(self._on_files_dropped)
+
         # Favorites panel selection
         self._favorites_panel.folder_selected.connect(self._navigate_to)
 
@@ -706,3 +709,35 @@ class MainWindow(QMainWindow):
 
         window = get_window_manager().create_window(path)
         window.show()
+
+    def _on_files_dropped(self, paths: list[Path], destination: Path):
+        """Handle files dropped onto folder tree."""
+        from PySide6.QtWidgets import QMessageBox
+        from commander.widgets.progress_dialog import ProgressDialog
+
+        # Filter out files already in destination
+        paths_to_copy = [p for p in paths if p.parent != destination]
+        if not paths_to_copy:
+            return
+
+        # Ask user: Copy or Move?
+        reply = QMessageBox.question(
+            self,
+            tr("drop_files"),
+            tr("drop_copy_or_move").format(count=len(paths_to_copy)),
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No
+            | QMessageBox.StandardButton.Cancel,
+        )
+
+        if reply == QMessageBox.StandardButton.Cancel:
+            return
+
+        if reply == QMessageBox.StandardButton.Yes:
+            dialog = ProgressDialog("copy", paths_to_copy, destination, self)
+            dialog.exec()
+        else:
+            dialog = ProgressDialog("move", paths_to_copy, destination, self)
+            dialog.exec()
+
+        self._refresh()

@@ -3,14 +3,16 @@
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QDir, QModelIndex
-from PySide6.QtWidgets import QTreeView, QFileSystemModel
+from PySide6.QtCore import Qt, Signal, QDir, QModelIndex, QUrl, QMimeData
+from PySide6.QtWidgets import QTreeView, QFileSystemModel, QAbstractItemView
+from PySide6.QtGui import QDragEnterEvent, QDropEvent, QDrag
 
 
 class FolderTreeView(QTreeView):
-    """Left panel folder tree view."""
+    """Left panel folder tree view with drag and drop support."""
 
     folder_selected = Signal(Path)
+    files_dropped = Signal(list, Path)  # dropped files, destination folder
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -30,6 +32,12 @@ class FolderTreeView(QTreeView):
         self.setHeaderHidden(True)
         self.setAnimated(True)
         self.setIndentation(20)
+
+        # Enable drag and drop
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.setDefaultDropAction(Qt.DropAction.CopyAction)
 
         # Signals
         self.clicked.connect(self._on_clicked)
@@ -72,3 +80,33 @@ class FolderTreeView(QTreeView):
             self.setCurrentIndex(index)
             self.scrollTo(index)
             self._expand_to_path(path)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        """Handle drag enter - accept file drops."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        """Handle drag move - highlight target folder."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        """Handle drop - copy/move files to target folder."""
+        if event.mimeData().hasUrls():
+            # Get drop target folder
+            index = self.indexAt(event.position().toPoint())
+            if index.isValid():
+                target_path = Path(self._model.filePath(index))
+                if target_path.is_dir():
+                    urls = event.mimeData().urls()
+                    paths = [Path(url.toLocalFile()) for url in urls if url.isLocalFile()]
+                    if paths:
+                        self.files_dropped.emit(paths, target_path)
+                        event.acceptProposedAction()
+                        return
+        super().dropEvent(event)
