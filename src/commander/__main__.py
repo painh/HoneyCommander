@@ -16,22 +16,38 @@ def setup_logging():
         sys.__excepthook__(exc_type, exc_value, exc_tb)
 
     sys.excepthook = exception_hook
+    logger.info("Exception hook installed")
     return logger
 
 
 # Initialize logging early
 _logger = setup_logging()
+_logger.info("Starting imports...")
 
-from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QIcon
-from PySide6.QtCore import QEvent
+try:
+    _logger.debug("Importing PySide6.QtWidgets...")
+    from PySide6.QtWidgets import QApplication
 
-from commander.views.main_window import MainWindow
-from commander.utils.i18n import tr
+    _logger.debug("Importing PySide6.QtGui...")
+    from PySide6.QtGui import QIcon
 
+    _logger.debug("Importing PySide6.QtCore...")
+    from PySide6.QtCore import QEvent
 
-# Supported image formats - import from image_loader for consistency
-from commander.core.image_loader import ALL_IMAGE_FORMATS as IMAGE_EXTENSIONS
+    _logger.debug("Importing MainWindow...")
+    from commander.views.main_window import MainWindow
+
+    _logger.debug("Importing i18n...")
+    from commander.utils.i18n import tr
+
+    _logger.debug("Importing image_loader...")
+    # Supported image formats - import from image_loader for consistency
+    from commander.core.image_loader import ALL_IMAGE_FORMATS as IMAGE_EXTENSIONS
+
+    _logger.info("All imports completed successfully")
+except Exception as e:
+    _logger.critical(f"Failed to import modules: {e}", exc_info=True)
+    raise
 
 
 class WindowManager:
@@ -41,6 +57,7 @@ class WindowManager:
 
     def __init__(self):
         self._windows: list[MainWindow] = []
+        _logger.debug("WindowManager initialized")
 
     @classmethod
     def instance(cls) -> "WindowManager":
@@ -50,12 +67,20 @@ class WindowManager:
 
     def create_window(self, path: Path | None = None) -> MainWindow:
         """Create a new window, optionally at a specific path."""
-        window = MainWindow()
-        if path and path.exists() and path.is_dir():
-            window._navigate_to(path)
-        window.destroyed.connect(lambda: self._on_window_destroyed(window))
-        self._windows.append(window)
-        return window
+        _logger.info(f"Creating new window at path: {path}")
+        try:
+            window = MainWindow()
+            _logger.debug("MainWindow created")
+            if path and path.exists() and path.is_dir():
+                window._navigate_to(path)
+                _logger.debug(f"Navigated to path: {path}")
+            window.destroyed.connect(lambda: self._on_window_destroyed(window))
+            self._windows.append(window)
+            _logger.info(f"Window created successfully. Total windows: {len(self._windows)}")
+            return window
+        except Exception as e:
+            _logger.critical(f"Failed to create window: {e}", exc_info=True)
+            raise
 
     def _on_window_destroyed(self, window: MainWindow):
         """Remove window from list when destroyed."""
@@ -81,7 +106,9 @@ class CommanderApp(QApplication):
     """Custom QApplication to handle macOS file open events."""
 
     def __init__(self, argv):
+        _logger.info("Creating QApplication...")
         super().__init__(argv)
+        _logger.debug("QApplication created")
         self._pending_files: list[Path] = []
         self._viewer = None
         self._started = False
@@ -141,11 +168,15 @@ def get_images_in_folder(folder: Path) -> list[Path]:
 
 
 def main():
+    _logger.info("main() started")
+
     # Get app name from i18n
     app_name = tr("app_name")
+    _logger.debug(f"App name: {app_name}")
 
     # Set app info before creating QApplication for proper macOS menu bar
     if sys.platform == "darwin":
+        _logger.debug("Setting up macOS bundle info...")
         # This must be done before QApplication is created
         try:
             from Foundation import NSBundle
@@ -154,50 +185,72 @@ def main():
             info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
             if info:
                 info["CFBundleName"] = app_name
+            _logger.debug("macOS bundle info set")
         except ImportError:
-            pass  # pyobjc not installed
+            _logger.debug("pyobjc not installed, skipping bundle setup")
 
+    _logger.info("Creating CommanderApp...")
     app = CommanderApp(sys.argv)
     app.setApplicationName(app_name)
     app.setApplicationDisplayName(app_name)
     app.setOrganizationName("HoneyCommander")
+    _logger.debug("App properties set")
 
     # Set app icon
+    _logger.debug("Setting app icon...")
     if getattr(sys, "frozen", False):
         # PyInstaller frozen app
         icon_path = Path(sys._MEIPASS) / "assets" / "icon.png"  # type: ignore
+        _logger.debug(f"Frozen app icon path: {icon_path}")
     else:
         icon_path = Path(__file__).parent.parent.parent / "assets" / "icon.png"
+        _logger.debug(f"Dev icon path: {icon_path}")
+
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
+        _logger.debug("App icon set")
+    else:
+        _logger.warning(f"Icon not found: {icon_path}")
 
+    _logger.info("Getting WindowManager...")
     wm = get_window_manager()
 
     # Check if an image file was passed as argument (command line)
     if len(sys.argv) > 1:
         arg_path = Path(sys.argv[1]).resolve()
+        _logger.info(f"Command line argument: {arg_path}")
 
         if arg_path.exists() and is_image_file(arg_path):
             # Open image viewer directly
+            _logger.info("Opening image viewer for file argument")
             app._open_image_viewer(arg_path)
             app._started = True
+            _logger.info("Starting event loop (image viewer mode)")
             sys.exit(app.exec())
         elif arg_path.exists() and arg_path.is_dir():
             # Open main window at specified directory
+            _logger.info(f"Opening window at directory: {arg_path}")
             window = wm.create_window(arg_path)
             window.show()
+            _logger.info("Window shown")
             app._started = True
+            _logger.info("Starting event loop (directory mode)")
             sys.exit(app.exec())
 
     # Check for pending files from macOS FileOpen events
     if app.process_pending_files():
+        _logger.info("Processed pending files, starting event loop")
         sys.exit(app.exec())
 
     # Default: open main window
+    _logger.info("Opening default main window...")
     window = wm.create_window()
+    _logger.info("Showing window...")
     window.show()
+    _logger.info("Window shown successfully")
     app._started = True
 
+    _logger.info("Starting Qt event loop...")
     sys.exit(app.exec())
 
 

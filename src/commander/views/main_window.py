@@ -27,12 +27,16 @@ from commander.core.undo_manager import get_undo_manager
 from commander.utils.settings import Settings
 from commander.utils.i18n import tr
 from commander.utils.update_checker import check_for_updates_async, ReleaseInfo
+from commander.utils.logger import get_logger
+
+_logger = get_logger()
 
 
 class MainWindow(QMainWindow):
     """Main window with explorer-style 3-panel layout."""
 
     def __init__(self):
+        _logger.info("MainWindow.__init__ started")
         super().__init__()
         self._settings = Settings()
         self._current_path: Path = Path.home()
@@ -44,21 +48,30 @@ class MainWindow(QMainWindow):
         self._watcher = QFileSystemWatcher()
         self._watcher.directoryChanged.connect(self._on_directory_changed)
 
+        _logger.debug("Setting up toolbar...")
         self._setup_toolbar()
+        _logger.debug("Setting up UI...")
         self._setup_ui()
+        _logger.debug("Setting up menu...")
         self._setup_menu()
+        _logger.debug("Setting up shortcuts...")
         self._setup_shortcuts()
+        _logger.debug("Connecting signals...")
         self._connect_signals()
+        _logger.debug("Loading settings...")
         self._load_settings()
+        _logger.debug("Checking for updates...")
         self._check_for_updates()
 
         self._update_window_title()
+        _logger.info("MainWindow.__init__ completed")
 
         # Keep reference to update thread
         self._update_thread = None
 
     def _setup_ui(self):
         """Setup the main UI layout."""
+        _logger.debug("_setup_ui: Creating central widget...")
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
@@ -67,10 +80,12 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(0)
 
         # Address bar
+        _logger.debug("_setup_ui: Creating AddressBar...")
         self._address_bar = AddressBar()
         main_layout.addWidget(self._address_bar)
 
         # 3-panel splitter
+        _logger.debug("_setup_ui: Creating splitter...")
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # Left panel: Favorites + Folder tree
@@ -79,13 +94,17 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(0)
 
+        _logger.debug("_setup_ui: Creating FavoritesPanel...")
         self._favorites_panel = FavoritesPanel()
+        _logger.debug("_setup_ui: Creating FolderTreeView...")
         self._folder_tree = FolderTreeView()
 
         left_layout.addWidget(self._favorites_panel)
         left_layout.addWidget(self._folder_tree, stretch=1)
 
+        _logger.debug("_setup_ui: Creating FileListView...")
         self._file_list = FileListView()
+        _logger.debug("_setup_ui: Creating PreviewPanel...")
         self._preview_panel = PreviewPanel()
 
         self._splitter.addWidget(left_panel)
@@ -98,12 +117,15 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self._splitter, stretch=1)
 
         # Status bar
+        _logger.debug("_setup_ui: Creating status bar...")
         self._status_bar = QStatusBar()
         self.setStatusBar(self._status_bar)
         self._status_bar.showMessage("Ready")
 
         # Navigate to home
+        _logger.debug(f"_setup_ui: Navigating to {self._current_path}...")
         self._navigate_to(self._current_path)
+        _logger.debug("_setup_ui completed")
 
     def _setup_menu(self):
         """Setup menu bar."""
@@ -393,26 +415,33 @@ class MainWindow(QMainWindow):
 
     def _load_settings(self):
         """Load saved settings."""
+        _logger.debug("_load_settings started")
         # Window geometry
         geometry = self._settings.load_window_geometry()
         if geometry:
             self.restoreGeometry(geometry)
+            _logger.debug("Window geometry restored")
         else:
             self.resize(1200, 800)
+            _logger.debug("Using default window size 1200x800")
 
         # Splitter sizes
         sizes = self._settings.load_splitter_sizes()
         if sizes:
             self._splitter.setSizes(sizes)
+            _logger.debug(f"Splitter sizes restored: {sizes}")
 
         # Last path - navigate to it (this also updates _current_path)
         last_path = self._settings.load_last_path()
+        _logger.debug(f"Last path from settings: {last_path}")
         if last_path and last_path.exists():
             self._navigate_to(last_path)
 
         # View mode
         view_mode = self._settings.load_view_mode()
         self._file_list.set_view_mode(view_mode)
+        _logger.debug(f"View mode set to: {view_mode}")
+        _logger.debug("_load_settings completed")
 
     def _save_settings(self):
         """Save current settings."""
@@ -427,7 +456,9 @@ class MainWindow(QMainWindow):
 
     def _navigate_to(self, path: Path):
         """Navigate to a directory."""
+        _logger.debug(f"_navigate_to: {path}")
         if not path.exists() or not path.is_dir():
+            _logger.warning(f"Path does not exist or is not a directory: {path}")
             return
 
         # Update file system watcher
@@ -449,6 +480,7 @@ class MainWindow(QMainWindow):
 
         self._update_nav_buttons()
         self._update_status()
+        _logger.debug(f"Navigation to {path} completed")
 
     def _on_folder_selected(self, path: Path):
         """Handle folder tree selection."""
