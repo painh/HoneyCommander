@@ -22,13 +22,7 @@ jobs:
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           
           # Extract version from __init__.py
-          CODE_VERSION=$(python -c "
-          import re
-          with open('src/commander/__init__.py') as f:
-              content = f.read()
-              match = re.search(r'__version__\s*=\s*[\"']([^\"']+)[\"']', content)
-              print(match.group(1) if match else '')
-          ")
+          CODE_VERSION=$(python3 -c 'import re; f=open("src/commander/__init__.py").read(); m=re.search(r"__version__\s*=\s*\"([^\"]+)\"", f); print(m.group(1) if m else "")')
           
           echo "Tag version: $TAG_VERSION"
           echo "Code version: $CODE_VERSION"
