@@ -56,6 +56,7 @@ class FileListView(QWidget):
     item_activated = Signal(Path)
     request_compress = Signal(list)
     request_terminal = Signal(Path)
+    request_new_window = Signal(Path)  # Request to open folder in new window
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -299,6 +300,13 @@ class FileListView(QWidget):
         if selected_paths:
             open_action = menu.addAction("Open")
             open_action.triggered.connect(lambda: self._open_with_default(selected_paths[0]))
+
+            # Open in New Window (for folders)
+            if len(selected_paths) == 1 and selected_paths[0].is_dir():
+                new_window_action = menu.addAction("Open in New Window")
+                new_window_action.triggered.connect(
+                    lambda: self.request_new_window.emit(selected_paths[0])
+                )
 
             # Open With submenu (macOS only for now)
             if sys.platform == "darwin" and len(selected_paths) == 1:

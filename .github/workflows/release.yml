@@ -69,6 +69,27 @@ jobs:
           uv sync
           uv pip install pyinstaller
 
+      - name: Set build date
+        run: |
+          BUILD_DATE=$(date -u +"%Y-%m-%d %H:%M UTC")
+          echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Update build date in code
+        run: |
+          python -c "
+          import re
+          with open('src/commander/__init__.py', 'r') as f:
+              content = f.read()
+          content = re.sub(
+              r'__build_date__\s*=\s*\"[^\"]*\"',
+              '__build_date__ = \"${{ env.BUILD_DATE }}\"',
+              content
+          )
+          with open('src/commander/__init__.py', 'w') as f:
+              f.write(content)
+          "
+
       - name: Build with PyInstaller (macOS)
         if: matrix.os == 'macos-latest'
         run: |

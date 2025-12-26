@@ -33,6 +33,49 @@ from commander.utils.i18n import tr
 from commander.core.image_loader import ALL_IMAGE_FORMATS as IMAGE_EXTENSIONS
 
 
+class WindowManager:
+    """Manages multiple MainWindow instances."""
+
+    _instance: "WindowManager | None" = None
+
+    def __init__(self):
+        self._windows: list[MainWindow] = []
+
+    @classmethod
+    def instance(cls) -> "WindowManager":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def create_window(self, path: Path | None = None) -> MainWindow:
+        """Create a new window, optionally at a specific path."""
+        window = MainWindow()
+        if path and path.exists() and path.is_dir():
+            window._navigate_to(path)
+        window.destroyed.connect(lambda: self._on_window_destroyed(window))
+        self._windows.append(window)
+        return window
+
+    def _on_window_destroyed(self, window: MainWindow):
+        """Remove window from list when destroyed."""
+        if window in self._windows:
+            self._windows.remove(window)
+
+    def get_windows(self) -> list[MainWindow]:
+        """Get all open windows."""
+        return self._windows.copy()
+
+    def close_all(self):
+        """Close all windows."""
+        for window in self._windows.copy():
+            window.close()
+
+
+def get_window_manager() -> WindowManager:
+    """Get the singleton WindowManager instance."""
+    return WindowManager.instance()
+
+
 class CommanderApp(QApplication):
     """Custom QApplication to handle macOS file open events."""
 
@@ -40,7 +83,6 @@ class CommanderApp(QApplication):
         super().__init__(argv)
         self._pending_files: list[Path] = []
         self._viewer = None
-        self._main_window = None
         self._started = False
 
     def event(self, event: QEvent) -> bool:
@@ -72,10 +114,8 @@ class CommanderApp(QApplication):
         """Open the fullscreen image viewer."""
         from commander.views.viewer import FullscreenImageViewer
 
-        # Close main window if open
-        if self._main_window:
-            self._main_window.close()
-            self._main_window = None
+        # Close all windows
+        get_window_manager().close_all()
 
         # Get all images in the same folder
         images = get_images_in_folder(image_path.parent)
@@ -130,6 +170,8 @@ def main():
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
 
+    wm = get_window_manager()
+
     # Check if an image file was passed as argument (command line)
     if len(sys.argv) > 1:
         arg_path = Path(sys.argv[1]).resolve()
@@ -141,10 +183,8 @@ def main():
             sys.exit(app.exec())
         elif arg_path.exists() and arg_path.is_dir():
             # Open main window at specified directory
-            window = MainWindow()
-            window._navigate_to(arg_path)
+            window = wm.create_window(arg_path)
             window.show()
-            app._main_window = window
             app._started = True
             sys.exit(app.exec())
 
@@ -153,9 +193,8 @@ def main():
         sys.exit(app.exec())
 
     # Default: open main window
-    window = MainWindow()
+    window = wm.create_window()
     window.show()
-    app._main_window = window
     app._started = True
 
     sys.exit(app.exec())
