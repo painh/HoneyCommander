@@ -226,6 +226,11 @@ class MainWindow(QMainWindow):
         edit_menu.addSeparator()
         edit_menu.addAction(settings_action)
 
+        # Custom commands action
+        custom_commands_action = QAction(tr("custom_commands"), self)
+        custom_commands_action.triggered.connect(self._show_custom_commands)
+        edit_menu.addAction(custom_commands_action)
+
         # Help menu
         help_menu = menubar.addMenu(tr("menu_help"))
 
@@ -250,6 +255,13 @@ class MainWindow(QMainWindow):
         from commander.widgets.settings_dialog import SettingsDialog
 
         dialog = SettingsDialog(self)
+        dialog.exec()
+
+    def _show_custom_commands(self):
+        """Show custom commands dialog."""
+        from commander.widgets.custom_commands_dialog import CustomCommandsDialog
+
+        dialog = CustomCommandsDialog(self)
         dialog.exec()
 
     def _show_shortcuts(self):
@@ -363,6 +375,9 @@ class MainWindow(QMainWindow):
 
         # Folder tree drag and drop
         self._folder_tree.files_dropped.connect(self._on_files_dropped)
+
+        # Folder tree request new window
+        self._folder_tree.request_new_window.connect(self._open_new_window_at)
 
         # Favorites panel selection
         self._favorites_panel.folder_selected.connect(self._navigate_to)

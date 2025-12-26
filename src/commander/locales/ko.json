@@ -162,5 +162,22 @@
   "download": "다운로드",
   "later": "나중에",
   "check_for_updates": "업데이트 확인",
-  "no_updates_available": "현재 최신 버전입니다."
+  "no_updates_available": "현재 최신 버전입니다.",
+
+  "add": "추가",
+  "custom_commands": "사용자 정의 명령...",
+  "custom_commands_title": "사용자 정의 명령",
+  "custom_commands_edit": "명령 편집",
+  "custom_commands_name": "이름:",
+  "custom_commands_command": "명령:",
+  "custom_commands_placeholders": "변수: {path} = 전체 경로, {dir} = 폴더, {name} = 파일명, {stem} = 확장자 제외 이름, {ext} = 확장자",
+  "custom_commands_extensions": "확장자:",
+  "custom_commands_extensions_placeholder": "예: png, jpg, txt (비우면 모든 파일)",
+  "custom_commands_for_files": "파일에 표시",
+  "custom_commands_for_dirs": "폴더에 표시",
+  "custom_commands_enabled": "활성화",
+  "custom_commands_new": "새 명령",
+  "custom_commands_confirm_delete": "이 명령을 삭제하시겠습니까?",
+  "custom_commands_reset": "기본값으로 복원",
+  "custom_commands_confirm_reset": "모든 명령을 기본값으로 복원하시겠습니까? 사용자 정의 명령이 삭제됩니다."
 }

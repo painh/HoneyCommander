@@ -292,6 +292,8 @@ class FileListView(QWidget):
 
     def _show_context_menu(self, pos: QPoint) -> None:
         """Show context menu with custom options."""
+        from commander.utils.custom_commands import get_custom_commands_manager
+
         selected_paths = self.get_selected_paths()
 
         menu = QMenu(self)
@@ -308,12 +310,27 @@ class FileListView(QWidget):
                     lambda: self.request_new_window.emit(selected_paths[0])
                 )
 
+            # Custom commands submenu
+            if len(selected_paths) == 1:
+                custom_cmds = get_custom_commands_manager().get_commands_for_path(selected_paths[0])
+                if custom_cmds:
+                    menu.addSeparator()
+                    for cmd in custom_cmds:
+                        action = menu.addAction(cmd.name)
+                        action.triggered.connect(
+                            lambda checked, c=cmd, p=selected_paths[0]: self._run_custom_command(
+                                c, p
+                            )
+                        )
+
             # Open With submenu (macOS only for now)
             if sys.platform == "darwin" and len(selected_paths) == 1:
                 open_with_menu = menu.addMenu("Open With")
                 self._populate_open_with_menu(open_with_menu, selected_paths[0])
 
             if len(selected_paths) == 1:
+                menu.addSeparator()
+
                 # Rename (F2)
                 rename_action = menu.addAction("Rename")
                 rename_action.setShortcut("F2")
@@ -371,15 +388,6 @@ class FileListView(QWidget):
 
         menu.addSeparator()
 
-        # Open terminal here
-        if sys.platform == "darwin":
-            terminal_action = menu.addAction("Open Terminal Here")
-        elif sys.platform == "win32":
-            terminal_action = menu.addAction("Open PowerShell Here")
-        else:
-            terminal_action = menu.addAction("Open Terminal Here")
-        terminal_action.triggered.connect(self._open_terminal)
-
         # Show in Finder/Explorer
         if sys.platform == "darwin":
             reveal_action = menu.addAction("Reveal in Finder")
@@ -394,6 +402,40 @@ class FileListView(QWidget):
 
         view = self._current_view()
         menu.exec(view.mapToGlobal(pos))
+
+    def _run_custom_command(self, cmd, path: Path) -> None:
+        """Run a custom command."""
+        from commander.utils.custom_commands import get_custom_commands_manager
+
+        mgr = get_custom_commands_manager()
+        if mgr.is_builtin_command(cmd):
+            # Handle built-in commands
+            if cmd.command == "__builtin__:image_viewer":
+                self._open_builtin_image_viewer(path)
+        else:
+            cmd.execute(path)
+
+    def _open_builtin_image_viewer(self, path: Path) -> None:
+        """Open built-in image viewer."""
+        from commander.views.viewer import FullscreenImageViewer
+        from commander.core.image_loader import ALL_IMAGE_FORMATS
+
+        if path.is_dir():
+            # Find first image in directory
+            images = sorted([p for p in path.iterdir() if p.suffix.lower() in ALL_IMAGE_FORMATS])
+            if images:
+                path = images[0]
+            else:
+                return  # No images in directory
+
+        # Get all images in same directory
+        parent = path.parent
+        images = sorted([p for p in parent.iterdir() if p.suffix.lower() in ALL_IMAGE_FORMATS])
+
+        if not hasattr(self, "_viewer") or self._viewer is None:
+            self._viewer = FullscreenImageViewer(self.window())
+
+        self._viewer.show_image(path, images)
 
     # === File Operations ===
 

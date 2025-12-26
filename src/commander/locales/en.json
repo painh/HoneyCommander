@@ -162,5 +162,22 @@
   "download": "Download",
   "later": "Later",
   "check_for_updates": "Check for Updates",
-  "no_updates_available": "You are using the latest version."
+  "no_updates_available": "You are using the latest version.",
+
+  "add": "Add",
+  "custom_commands": "Custom Commands...",
+  "custom_commands_title": "Custom Commands",
+  "custom_commands_edit": "Edit Command",
+  "custom_commands_name": "Name:",
+  "custom_commands_command": "Command:",
+  "custom_commands_placeholders": "Placeholders: {path} = full path, {dir} = directory, {name} = filename, {stem} = name without extension, {ext} = extension",
+  "custom_commands_extensions": "Extensions:",
+  "custom_commands_extensions_placeholder": "e.g., png, jpg, txt (empty = all)",
+  "custom_commands_for_files": "Show for files",
+  "custom_commands_for_dirs": "Show for directories",
+  "custom_commands_enabled": "Enabled",
+  "custom_commands_new": "New Command",
+  "custom_commands_confirm_delete": "Delete this command?",
+  "custom_commands_reset": "Reset to Defaults",
+  "custom_commands_confirm_reset": "Reset all commands to defaults? Your custom commands will be lost."
 }
