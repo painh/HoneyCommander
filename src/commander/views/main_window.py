@@ -621,16 +621,25 @@ class MainWindow(QMainWindow):
         except PermissionError:
             self._status_bar.showMessage("Access denied")
 
+    def _get_focused_paths(self) -> list[Path]:
+        """Get selected paths from the focused panel."""
+        # Check if folder tree has focus
+        if self._folder_tree.hasFocus():
+            path = self._folder_tree.get_selected_path()
+            return [path] if path else []
+        # Default to file list
+        return self._file_list.get_selected_paths()
+
     def _copy_selected(self):
         """Copy selected items to clipboard."""
-        paths = self._file_list.get_selected_paths()
+        paths = self._get_focused_paths()
         if paths:
             self._file_ops.copy_to_clipboard(paths)
             self._status_bar.showMessage(f"Copied {len(paths)} item(s)")
 
     def _cut_selected(self):
         """Cut selected items to clipboard."""
-        paths = self._file_list.get_selected_paths()
+        paths = self._get_focused_paths()
         if paths:
             self._file_ops.cut_to_clipboard(paths)
             self._status_bar.showMessage(f"Cut {len(paths)} item(s)")

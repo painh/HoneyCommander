@@ -69,6 +69,29 @@ class SettingsDialog(QDialog):
         view_tab = QWidget()
         view_layout = QVBoxLayout(view_tab)
 
+        # Colors/Theme group
+        colors_group = QGroupBox(tr("settings_colors"))
+        colors_form = QFormLayout(colors_group)
+
+        self._theme_combo = QComboBox()
+        from commander.utils.themes import get_theme_manager
+
+        for theme in get_theme_manager().get_available_themes():
+            self._theme_combo.addItem(theme.display_name, theme.name)
+
+        colors_form.addRow(tr("settings_color_theme"), self._theme_combo)
+
+        # Theme description label
+        self._theme_desc_label = QLabel()
+        self._theme_desc_label.setStyleSheet("color: #888; font-size: 11px;")
+        self._theme_desc_label.setWordWrap(True)
+        colors_form.addRow("", self._theme_desc_label)
+
+        self._theme_combo.currentIndexChanged.connect(self._on_theme_changed)
+
+        view_layout.addWidget(colors_group)
+
+        # Thumbnails group
         view_group = QGroupBox(tr("settings_thumbnails"))
         view_form = QFormLayout(view_group)
 
@@ -171,7 +194,13 @@ class SettingsDialog(QDialog):
         else:
             self._lang_combo.setCurrentIndex(0)
 
-        # View
+        # View - Theme
+        current_theme = self._settings.load_color_theme()
+        index = self._theme_combo.findData(current_theme)
+        if index >= 0:
+            self._theme_combo.setCurrentIndex(index)
+        self._update_theme_description()
+
         self._thumb_size_spin.setValue(self._settings.load_thumbnail_size())
         self._anim_thumb_spin.setValue(self._settings.load_animation_thumb_size())
 
@@ -195,7 +224,14 @@ class SettingsDialog(QDialog):
         else:
             self._settings.save_language(lang_code)
 
-        # View
+        # View - Theme
+        theme_name = self._theme_combo.currentData()
+        self._settings.save_color_theme(theme_name)
+        # Reset theme manager cache
+        from commander.utils.themes import get_theme_manager
+
+        get_theme_manager()._current_theme = None
+
         self._settings.save_thumbnail_size(self._thumb_size_spin.value())
         self._settings.save_animation_thumb_size(self._anim_thumb_spin.value())
 
@@ -213,3 +249,16 @@ class SettingsDialog(QDialog):
         set_logging_enabled(self._logging_checkbox.isChecked())
 
         self.accept()
+
+    def _on_theme_changed(self, index: int) -> None:
+        """Handle theme selection change."""
+        self._update_theme_description()
+
+    def _update_theme_description(self) -> None:
+        """Update theme description label."""
+        from commander.utils.themes import THEMES
+
+        theme_name = self._theme_combo.currentData()
+        if theme_name and theme_name in THEMES:
+            theme = THEMES[theme_name]
+            self._theme_desc_label.setText(theme.description)

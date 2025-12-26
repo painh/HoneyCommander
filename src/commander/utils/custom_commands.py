@@ -20,6 +20,7 @@ class CustomCommand:
     for_directories: bool = True  # Show for directories
     for_files: bool = True  # Show for files
     enabled: bool = True
+    shortcut: str = ""  # Single key shortcut (e.g., "V", "T", "1")
 
     def matches(self, path: Path) -> bool:
         """Check if this command should be shown for the given path."""
@@ -106,17 +107,30 @@ class CustomCommandsManager:
         """Get default commands based on OS."""
         # Common image extensions
         image_exts = ["png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "ico", "psd", "psb"]
+        archive_exts = ["zip", "rar", "7z", "tar", "gz", "bz2"]
+        # Image viewer supports both images and archives (to view images inside archives)
+        image_viewer_exts = image_exts + archive_exts
 
-        # Built-in image viewer command (special: handled internally)
+        # Built-in commands (special: handled internally)
         image_viewer_cmd = CustomCommand(
             name="Open in Image Viewer",
             command="__builtin__:image_viewer",
-            extensions=image_exts,
+            extensions=image_viewer_exts,
             for_directories=True,
             for_files=True,
+            shortcut="3",
         )
 
-        commands = [image_viewer_cmd]
+        extract_cmd = CustomCommand(
+            name="Extract Here",
+            command="__builtin__:extract",
+            extensions=archive_exts,
+            for_directories=False,
+            for_files=True,
+            shortcut="Z",
+        )
+
+        commands = [image_viewer_cmd, extract_cmd]
 
         if sys.platform == "darwin":
             # macOS defaults
@@ -127,6 +141,7 @@ class CustomCommandsManager:
                     extensions=[],
                     for_directories=True,
                     for_files=True,
+                    shortcut="V",
                 ),
                 CustomCommand(
                     name="Open Terminal Here",
@@ -134,6 +149,7 @@ class CustomCommandsManager:
                     extensions=[],
                     for_directories=True,
                     for_files=True,
+                    shortcut="T",
                 ),
                 CustomCommand(
                     name="Open iTerm Here",
@@ -142,6 +158,7 @@ class CustomCommandsManager:
                     for_directories=True,
                     for_files=True,
                     enabled=False,
+                    shortcut="I",
                 ),
             ]
         elif sys.platform == "win32":
@@ -153,6 +170,7 @@ class CustomCommandsManager:
                     extensions=[],
                     for_directories=True,
                     for_files=True,
+                    shortcut="V",
                 ),
                 CustomCommand(
                     name="Open Git Bash Here",
@@ -160,6 +178,7 @@ class CustomCommandsManager:
                     extensions=[],
                     for_directories=True,
                     for_files=True,
+                    shortcut="G",
                 ),
                 CustomCommand(
                     name="Open CMD Here",
@@ -167,6 +186,7 @@ class CustomCommandsManager:
                     extensions=[],
                     for_directories=True,
                     for_files=True,
+                    shortcut="C",
                 ),
                 CustomCommand(
                     name="Open PowerShell Here",

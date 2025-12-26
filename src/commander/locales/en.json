@@ -118,6 +118,8 @@
   "settings_max_results": "Max search results:",
   "settings_cache_size": "Thumbnail cache size:",
   "settings_undo_stack": "Undo stack size:",
+  "settings_colors": "Colors",
+  "settings_color_theme": "Color Theme:",
   "settings_debug": "Debug",
   "settings_logging_enabled": "Enable logging:",
   "settings_log_path": "Log file:",
@@ -179,5 +181,10 @@
   "custom_commands_new": "New Command",
   "custom_commands_confirm_delete": "Delete this command?",
   "custom_commands_reset": "Reset to Defaults",
-  "custom_commands_confirm_reset": "Reset all commands to defaults? Your custom commands will be lost."
+  "custom_commands_confirm_reset": "Reset all commands to defaults? Your custom commands will be lost.",
+  "custom_commands_shortcut": "Shortcut:",
+  "custom_commands_shortcut_help": "Single key to activate when menu is open",
+
+  "image_viewer_subfolders_title": "Include Subfolders",
+  "image_viewer_subfolders_question": "This folder contains subfolders with images.\nDo you want to include images from all subfolders?"
 }

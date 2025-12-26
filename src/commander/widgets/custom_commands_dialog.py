@@ -118,6 +118,19 @@ class CustomCommandsDialog(QDialog):
         self._enabled_cb.stateChanged.connect(self._on_field_changed)
         editor_form.addRow("", self._enabled_cb)
 
+        self._shortcut_edit = QLineEdit()
+        self._shortcut_edit.setMaxLength(1)
+        self._shortcut_edit.setFixedWidth(50)
+        self._shortcut_edit.setPlaceholderText("V")
+        self._shortcut_edit.textChanged.connect(self._on_field_changed)
+        shortcut_help = QLabel(tr("custom_commands_shortcut_help"))
+        shortcut_help.setStyleSheet("color: #888; font-size: 11px;")
+        shortcut_layout = QHBoxLayout()
+        shortcut_layout.addWidget(self._shortcut_edit)
+        shortcut_layout.addWidget(shortcut_help)
+        shortcut_layout.addStretch()
+        editor_form.addRow(tr("custom_commands_shortcut"), shortcut_layout)
+
         right_layout.addWidget(editor_group)
         right_layout.addStretch()
 
@@ -180,6 +193,7 @@ class CustomCommandsDialog(QDialog):
         self._for_files_cb.blockSignals(True)
         self._for_dirs_cb.blockSignals(True)
         self._enabled_cb.blockSignals(True)
+        self._shortcut_edit.blockSignals(True)
 
         self._name_edit.setText(cmd.name)
         self._command_edit.setText(cmd.command)
@@ -187,6 +201,7 @@ class CustomCommandsDialog(QDialog):
         self._for_files_cb.setChecked(cmd.for_files)
         self._for_dirs_cb.setChecked(cmd.for_directories)
         self._enabled_cb.setChecked(cmd.enabled)
+        self._shortcut_edit.setText(cmd.shortcut)
 
         # Check if it's a built-in command (non-editable command field)
         is_builtin = self._manager.is_builtin_command(cmd)
@@ -202,6 +217,7 @@ class CustomCommandsDialog(QDialog):
         self._for_files_cb.blockSignals(False)
         self._for_dirs_cb.blockSignals(False)
         self._enabled_cb.blockSignals(False)
+        self._shortcut_edit.blockSignals(False)
 
     def _clear_editor(self):
         """Clear editor fields."""
@@ -211,6 +227,7 @@ class CustomCommandsDialog(QDialog):
         self._for_files_cb.setChecked(True)
         self._for_dirs_cb.setChecked(True)
         self._enabled_cb.setChecked(True)
+        self._shortcut_edit.clear()
 
     def _on_field_changed(self):
         """Handle field change - save immediately."""
@@ -241,6 +258,7 @@ class CustomCommandsDialog(QDialog):
             for_files=self._for_files_cb.isChecked(),
             for_directories=self._for_dirs_cb.isChecked(),
             enabled=self._enabled_cb.isChecked(),
+            shortcut=self._shortcut_edit.text().upper(),
         )
 
         self._manager.update_command(self._current_index, cmd)

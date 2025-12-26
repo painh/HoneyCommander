@@ -32,13 +32,32 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
 )
+from PySide6.QtGui import QColor, QBrush
 
 from commander.views.file_list.drop_views import DropEnabledTreeView, DropEnabledListView
 from commander.views.file_list.thumbnail_delegate import ThumbnailDelegate
 from commander.utils.settings import Settings
+from commander.utils.themes import get_file_color
 
 if TYPE_CHECKING:
     pass
+
+
+class ColoredFileSystemModel(QFileSystemModel):
+    """QFileSystemModel with theme-based file type colors."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
+        """Override data to provide custom foreground colors."""
+        if role == Qt.ItemDataRole.ForegroundRole:
+            file_path = Path(self.filePath(index))
+            color_hex = get_file_color(file_path)
+            if color_hex:
+                return QBrush(QColor(color_hex))
+
+        return super().data(index, role)
 
 
 class ViewMode(Enum):
@@ -61,7 +80,7 @@ class FileListView(QWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
 
-        self._model = QFileSystemModel()
+        self._model = ColoredFileSystemModel()
         self._model.setFilter(
             QDir.Filter.AllEntries
             | QDir.Filter.NoDotAndDotDot
@@ -176,6 +195,28 @@ class FileListView(QWidget):
         """Forward focus to the current view."""
         super().focusInEvent(event)
         self._current_view().setFocus()
+        self._update_focus_style()
+
+    def focusOutEvent(self, event) -> None:
+        """Handle focus out."""
+        super().focusOutEvent(event)
+        self._update_focus_style()
+
+    def _update_focus_style(self) -> None:
+        """Update border style based on focus and theme."""
+        from commander.utils.themes import get_theme_manager
+
+        theme = get_theme_manager().get_current_theme()
+
+        # Check if any child view has focus
+        has_focus = self.hasFocus() or self._tree_view.hasFocus() or self._list_view.hasFocus()
+
+        # Only apply focus border for retro theme
+        # Use dark cyan/teal like classic MDIR style
+        if theme.name == "retro" and has_focus:
+            self.setStyleSheet("FileListView { border: 2px solid #008080; }")
+        else:
+            self.setStyleSheet("")
 
     def set_root_path(self, path: Path) -> None:
         """Set the directory to display."""
@@ -316,7 +357,13 @@ class FileListView(QWidget):
                 if custom_cmds:
                     menu.addSeparator()
                     for cmd in custom_cmds:
-                        action = menu.addAction(cmd.name)
+                        # Show shortcut in menu name like "Open in Image Viewer(3)"
+                        name = cmd.name
+                        if cmd.shortcut:
+                            name = f"{cmd.name}({cmd.shortcut})"
+                        action = menu.addAction(name)
+                        if cmd.shortcut:
+                            action.setShortcut(cmd.shortcut)
                         action.triggered.connect(
                             lambda checked, c=cmd, p=selected_paths[0]: self._run_custom_command(
                                 c, p
@@ -412,30 +459,100 @@ class FileListView(QWidget):
             # Handle built-in commands
             if cmd.command == "__builtin__:image_viewer":
                 self._open_builtin_image_viewer(path)
+            elif cmd.command == "__builtin__:extract":
+                self._extract_archive(path)
         else:
             cmd.execute(path)
+
+    def _extract_archive(self, path: Path) -> None:
+        """Extract archive to same directory."""
+        from commander.core.archive_handler import ArchiveManager
+
+        if not path.is_file():
+            return
+
+        # Extract to directory with same name as archive (without extension)
+        extract_dir = path.parent / path.stem
+
+        try:
+            ArchiveManager.extract(path, extract_dir)
+            # Refresh view
+            if self._current_path:
+                self.set_root_path(self._current_path)
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Extract Error",
+                f"Failed to extract archive:\n{e}",
+            )
 
     def _open_builtin_image_viewer(self, path: Path) -> None:
         """Open built-in image viewer."""
         from commander.views.viewer import FullscreenImageViewer
         from commander.core.image_loader import ALL_IMAGE_FORMATS
+        from commander.core.archive_handler import ArchiveManager
 
         if path.is_dir():
-            # Find first image in directory
-            images = sorted([p for p in path.iterdir() if p.suffix.lower() in ALL_IMAGE_FORMATS])
+            images = self._collect_images_from_dir(path, ALL_IMAGE_FORMATS)
             if images:
                 path = images[0]
             else:
                 return  # No images in directory
-
-        # Get all images in same directory
-        parent = path.parent
-        images = sorted([p for p in parent.iterdir() if p.suffix.lower() in ALL_IMAGE_FORMATS])
+        elif ArchiveManager.is_archive(path):
+            # Open archive in image viewer - viewer will handle extracting images
+            if not hasattr(self, "_viewer") or self._viewer is None:
+                self._viewer = FullscreenImageViewer(self.window())
+            self._viewer.show_archive(path)
+            return
+        else:
+            # Get all images in same directory
+            parent = path.parent
+            images = sorted([p for p in parent.iterdir() if p.suffix.lower() in ALL_IMAGE_FORMATS])
 
         if not hasattr(self, "_viewer") or self._viewer is None:
             self._viewer = FullscreenImageViewer(self.window())
 
         self._viewer.show_image(path, images)
+
+    def _collect_images_from_dir(self, path: Path, formats: set) -> list[Path]:
+        """Collect images from directory, optionally including subdirectories."""
+        from commander.utils.i18n import tr
+
+        # Check if there are subdirectories with images
+        subdirs = [p for p in path.iterdir() if p.is_dir()]
+        has_subdirs_with_images = False
+
+        for subdir in subdirs:
+            try:
+                if any(p.suffix.lower() in formats for p in subdir.iterdir() if p.is_file()):
+                    has_subdirs_with_images = True
+                    break
+            except PermissionError:
+                continue
+
+        include_subdirs = False
+        if has_subdirs_with_images:
+            reply = QMessageBox.question(
+                self,
+                tr("image_viewer_subfolders_title"),
+                tr("image_viewer_subfolders_question"),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            include_subdirs = reply == QMessageBox.StandardButton.Yes
+
+        if include_subdirs:
+            # Recursively collect all images
+            images = []
+            for p in sorted(path.rglob("*")):
+                if p.is_file() and p.suffix.lower() in formats:
+                    images.append(p)
+            return images
+        else:
+            # Only current directory
+            return sorted(
+                [p for p in path.iterdir() if p.is_file() and p.suffix.lower() in formats]
+            )
 
     # === File Operations ===
 
@@ -696,6 +813,10 @@ class FileListView(QWidget):
 
     def eventFilter(self, obj, event) -> bool:
         """Filter key events from child views for fuzzy search."""
+        # Handle focus events from child views
+        if event.type() in (event.Type.FocusIn, event.Type.FocusOut):
+            self._update_focus_style()
+
         if event.type() == event.Type.KeyPress:
             key = event.key()
             text = event.text()

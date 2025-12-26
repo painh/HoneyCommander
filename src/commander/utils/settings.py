@@ -212,3 +212,21 @@ class Settings:
     def load_logging_enabled(self) -> bool:
         """Load logging enabled setting. Default True."""
         return self._settings.value("debug/logging_enabled", True, type=bool)
+
+    # File type colors enabled (legacy, kept for compatibility)
+    def save_file_type_colors_enabled(self, enabled: bool):
+        """Save file type colors enabled setting."""
+        self._settings.setValue("view/file_type_colors_enabled", enabled)
+
+    def load_file_type_colors_enabled(self) -> bool:
+        """Load file type colors enabled setting. Default True."""
+        return self._settings.value("view/file_type_colors_enabled", True, type=bool)
+
+    # Color theme
+    def save_color_theme(self, theme_name: str):
+        """Save color theme setting."""
+        self._settings.setValue("view/color_theme", theme_name)
+
+    def load_color_theme(self) -> str:
+        """Load color theme setting. Default 'retro'."""
+        return self._settings.value("view/color_theme", "retro", type=str)

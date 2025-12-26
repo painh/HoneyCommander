@@ -4,9 +4,10 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QModelIndex, QRect
 from PySide6.QtWidgets import QStyledItemDelegate, QStyle
-from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPainter, QColor
 
 from commander.core.thumbnail_provider import get_thumbnail_provider
+from commander.utils.themes import get_file_color
 
 
 class ThumbnailDelegate(QStyledItemDelegate):
@@ -23,6 +24,17 @@ class ThumbnailDelegate(QStyledItemDelegate):
         if self._view:
             self._view.viewport().update()
 
+    def _get_text_color(self, file_path: Path, option, is_selected: bool) -> QColor:
+        """Get text color based on file type."""
+        if is_selected:
+            return option.palette.highlightedText().color()
+
+        color_hex = get_file_color(file_path)
+        if color_hex:
+            return QColor(color_hex)
+
+        return option.palette.text().color()
+
     def paint(self, painter: QPainter, option, index: QModelIndex) -> None:
         """Paint the item with thumbnail if available."""
         # Get file path from model
@@ -34,9 +46,11 @@ class ThumbnailDelegate(QStyledItemDelegate):
         if file_path.is_file() and self._thumbnail_provider.is_supported(file_path):
             thumbnail = self._thumbnail_provider.get_thumbnail(file_path)
 
+        is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
+
         if thumbnail:
             # Draw selection background
-            if option.state & QStyle.StateFlag.State_Selected:
+            if is_selected:
                 painter.fillRect(option.rect, option.palette.highlight())
 
             # Calculate centered position for thumbnail
@@ -56,11 +70,7 @@ class ThumbnailDelegate(QStyledItemDelegate):
                 30,
             )
 
-            text_color = (
-                option.palette.highlightedText().color()
-                if option.state & QStyle.StateFlag.State_Selected
-                else option.palette.text().color()
-            )
+            text_color = self._get_text_color(file_path, option, is_selected)
             painter.setPen(text_color)
 
             file_name = model.fileName(index)

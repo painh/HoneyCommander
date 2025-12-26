@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 import subprocess
 from pathlib import Path
+from io import BytesIO
+from dataclasses import dataclass
 
 from PySide6.QtCore import Qt, Signal, QSize, QPoint
 from PySide6.QtWidgets import (
@@ -32,6 +34,43 @@ from commander.utils.settings import Settings
 from commander.views.viewer.animation_controller import AnimationController
 
 
+@dataclass
+class ArchiveImageEntry:
+    """Represents an image inside an archive."""
+
+    archive_path: Path  # Path to the archive file
+    internal_path: str  # Path inside the archive
+    name: str  # Display name
+
+
+def _load_pixmap_from_bytes(data: bytes) -> QPixmap:
+    """Load QPixmap from raw bytes."""
+    from PIL import Image
+
+    try:
+        # Try loading with PIL first (supports more formats)
+        pil_image = Image.open(BytesIO(data))
+        if pil_image.mode not in ("RGB", "RGBA"):
+            pil_image = pil_image.convert("RGBA")
+
+        # Convert PIL to QPixmap
+        from PySide6.QtGui import QImage
+
+        if pil_image.mode == "RGBA":
+            qformat = QImage.Format.Format_RGBA8888
+        else:
+            qformat = QImage.Format.Format_RGB888
+
+        img_data = pil_image.tobytes()
+        qimage = QImage(img_data, pil_image.width, pil_image.height, qformat)
+        return QPixmap.fromImage(qimage)
+    except Exception:
+        # Fallback to Qt's loader
+        pixmap = QPixmap()
+        pixmap.loadFromData(data)
+        return pixmap
+
+
 class FullscreenImageViewer(QWidget):
     """Fullscreen image viewer with navigation."""
 
@@ -54,6 +93,11 @@ class FullscreenImageViewer(QWidget):
         self._pan_start: QPoint | None = None
         self._smooth_filter: bool = False
         self._info_overlay_visible: bool = False
+
+        # Archive mode
+        self._archive_mode: bool = False
+        self._archive_images: list[ArchiveImageEntry] = []
+        self._archive_handler = None
 
         # Animation controller
         self._anim = AnimationController(self)
@@ -156,6 +200,11 @@ class FullscreenImageViewer(QWidget):
 
     def show_image(self, path: Path, image_list: list[Path] | None = None) -> None:
         """Show image and optionally set image list for navigation."""
+        # Exit archive mode
+        self._archive_mode = False
+        self._archive_images = []
+        self._close_archive_handler()
+
         self._image_list = image_list or [path]
 
         try:
@@ -167,6 +216,73 @@ class FullscreenImageViewer(QWidget):
         self._reset_transform()
         self._load_current_image()
         self.showFullScreen()
+
+    def show_archive(self, archive_path: Path) -> None:
+        """Show images from an archive file."""
+        from commander.core.archive_handler import ArchiveManager
+
+        # Close previous handler if any
+        self._close_archive_handler()
+
+        # Open archive
+        handler = ArchiveManager.get_handler(archive_path)
+        if not handler:
+            QMessageBox.warning(self, "Error", f"Cannot open archive: {archive_path.name}")
+            return
+
+        self._archive_handler = handler
+
+        # Collect all image files from archive (recursively)
+        image_entries = self._collect_archive_images(archive_path, handler, "")
+
+        if not image_entries:
+            handler.close()
+            self._archive_handler = None
+            QMessageBox.information(self, "Info", "No images found in archive.")
+            return
+
+        # Sort by path
+        image_entries.sort(key=lambda e: e.internal_path.lower())
+
+        self._archive_mode = True
+        self._archive_images = image_entries
+        self._image_list = []  # Clear normal image list
+        self._current_index = 0
+
+        self._reset_transform()
+        self._load_current_image()
+        self.showFullScreen()
+
+    def _collect_archive_images(
+        self, archive_path: Path, handler, internal_path: str
+    ) -> list[ArchiveImageEntry]:
+        """Recursively collect all image files from archive."""
+        entries = []
+        for entry in handler.list_entries(internal_path):
+            if entry.is_dir:
+                # Recurse into subdirectory
+                entries.extend(self._collect_archive_images(archive_path, handler, entry.path))
+            else:
+                # Check if it's an image file
+                suffix = Path(entry.name).suffix.lower()
+                if suffix in ALL_IMAGE_FORMATS:
+                    entries.append(
+                        ArchiveImageEntry(
+                            archive_path=archive_path,
+                            internal_path=entry.path,
+                            name=entry.name,
+                        )
+                    )
+        return entries
+
+    def _close_archive_handler(self) -> None:
+        """Close archive handler if open."""
+        if self._archive_handler:
+            try:
+                self._archive_handler.close()
+            except Exception:
+                pass
+            self._archive_handler = None
 
     # ══════════════════════════════════════════════════════════════════════════
     # Image Loading
@@ -182,28 +298,52 @@ class FullscreenImageViewer(QWidget):
 
     def _load_current_image(self) -> None:
         """Load and display current image."""
-        if not self._image_list:
-            return
-
         self._anim.stop()
-        path = self._image_list[self._current_index]
-
-        # Try loading as animation
-        if self._anim.load(path):
-            self._load_animated(path)
-            return
-
-        # Static image
         self._frame_panel.hide()
-        self._original_pixmap = load_pixmap(path)
 
-        if self._original_pixmap.isNull():
-            self._image_label.setText(f"Cannot load: {path.name}")
+        if self._archive_mode:
+            # Load from archive
+            if not self._archive_images:
+                return
+            entry = self._archive_images[self._current_index]
+            self._original_pixmap = self._load_archive_image(entry)
+        else:
+            # Load from filesystem
+            if not self._image_list:
+                return
+            path = self._image_list[self._current_index]
+
+            # Try loading as animation
+            if self._anim.load(path):
+                self._load_animated(path)
+                return
+
+            self._original_pixmap = load_pixmap(path)
+
+        if self._original_pixmap is None or self._original_pixmap.isNull():
+            name = (
+                self._archive_images[self._current_index].name
+                if self._archive_mode
+                else self._image_list[self._current_index].name
+            )
+            self._image_label.setText(f"Cannot load: {name}")
             return
 
         self._zoom_level = self._get_fit_scale()
         self._update_display()
         self._update_info()
+
+    def _load_archive_image(self, entry: ArchiveImageEntry) -> QPixmap:
+        """Load image from archive."""
+        if not self._archive_handler:
+            return QPixmap()
+
+        try:
+            data = self._archive_handler.read_file(entry.internal_path)
+            return _load_pixmap_from_bytes(data)
+        except Exception as e:
+            print(f"Error loading {entry.internal_path}: {e}")
+            return QPixmap()
 
     def _load_animated(self, path: Path) -> None:
         """Setup animated image display."""
@@ -395,6 +535,26 @@ class FullscreenImageViewer(QWidget):
 
     def _update_info(self) -> None:
         """Update info label."""
+        if self._archive_mode:
+            if not self._archive_images:
+                return
+            entry = self._archive_images[self._current_index]
+            total = len(self._archive_images)
+            current = self._current_index + 1
+            zoom_percent = int(self._zoom_level * 100)
+
+            # Resolution
+            if self._original_pixmap and not self._original_pixmap.isNull():
+                res_str = f"{self._original_pixmap.width()}x{self._original_pixmap.height()}"
+            else:
+                res_str = ""
+
+            # Build info string for archive mode
+            archive_name = entry.archive_path.name
+            info = f"[{archive_name}] {entry.internal_path} | {current}/{total} | {res_str} | {zoom_percent}%"
+            self._info_label.setText(info)
+            return
+
         if not self._image_list:
             return
 
@@ -457,8 +617,15 @@ class FullscreenImageViewer(QWidget):
     # Navigation
     # ══════════════════════════════════════════════════════════════════════════
 
+    def _get_total_images(self) -> int:
+        """Get total number of images."""
+        if self._archive_mode:
+            return len(self._archive_images)
+        return len(self._image_list)
+
     def _next_image(self) -> None:
-        if self._current_index < len(self._image_list) - 1:
+        total = self._get_total_images()
+        if self._current_index < total - 1:
             self._current_index += 1
             self._reset_transform()
             self._load_current_image()
@@ -873,7 +1040,7 @@ class FullscreenImageViewer(QWidget):
             self._reset_transform()
             self._load_current_image()
         elif key == Qt.Key.Key_End:
-            self._current_index = len(self._image_list) - 1
+            self._current_index = self._get_total_images() - 1
             self._reset_transform()
             self._load_current_image()
         elif key == Qt.Key.Key_R:
@@ -927,7 +1094,17 @@ class FullscreenImageViewer(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self._pan_start = event.pos()
         elif event.button() == Qt.MouseButton.MiddleButton:
-            self._zoom_fit()
+            self._toggle_fullscreen()
+
+    def _toggle_fullscreen(self) -> None:
+        """Toggle between fullscreen and normal window mode."""
+        if self.isFullScreen():
+            self.showNormal()
+            # Restore window frame
+            self.setWindowFlags(Qt.WindowType.Window)
+            self.show()
+        else:
+            self.showFullScreen()
 
     def mouseMoveEvent(self, event) -> None:
         if self._pan_start and event.buttons() & Qt.MouseButton.LeftButton:
@@ -943,5 +1120,6 @@ class FullscreenImageViewer(QWidget):
             self._pan_start = None
 
     def closeEvent(self, event) -> None:
+        self._close_archive_handler()
         self.closed.emit()
         super().closeEvent(event)

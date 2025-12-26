@@ -118,6 +118,8 @@
   "settings_max_results": "검색 결과 최대 개수:",
   "settings_cache_size": "썸네일 캐시 개수:",
   "settings_undo_stack": "실행취소 스택 크기:",
+  "settings_colors": "색상",
+  "settings_color_theme": "색상 테마:",
   "settings_debug": "디버그",
   "settings_logging_enabled": "로그 활성화:",
   "settings_log_path": "로그 파일:",
@@ -179,5 +181,10 @@
   "custom_commands_new": "새 명령",
   "custom_commands_confirm_delete": "이 명령을 삭제하시겠습니까?",
   "custom_commands_reset": "기본값으로 복원",
-  "custom_commands_confirm_reset": "모든 명령을 기본값으로 복원하시겠습니까? 사용자 정의 명령이 삭제됩니다."
+  "custom_commands_confirm_reset": "모든 명령을 기본값으로 복원하시겠습니까? 사용자 정의 명령이 삭제됩니다.",
+  "custom_commands_shortcut": "단축키:",
+  "custom_commands_shortcut_help": "메뉴가 열려 있을 때 활성화되는 키",
+
+  "image_viewer_subfolders_title": "하위 폴더 포함",
+  "image_viewer_subfolders_question": "이 폴더에 이미지가 있는 하위 폴더가 있습니다.\n모든 하위 폴더의 이미지를 포함하시겠습니까?"
 }

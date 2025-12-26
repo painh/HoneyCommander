@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QApplication,
 )
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QDragEnterEvent, QDropEvent, QFocusEvent
 
 
 class FolderTreeView(QTreeView):
@@ -53,6 +53,9 @@ class FolderTreeView(QTreeView):
 
         # Signals
         self.clicked.connect(self._on_clicked)
+
+        # Focus styling
+        self._update_focus_style()
 
     def _setup_root(self):
         """Setup root path based on platform."""
@@ -150,7 +153,13 @@ class FolderTreeView(QTreeView):
         if custom_cmds:
             menu.addSeparator()
             for cmd in custom_cmds:
-                action = menu.addAction(cmd.name)
+                # Show shortcut in menu name like "Open in Image Viewer(3)"
+                name = cmd.name
+                if cmd.shortcut:
+                    name = f"{cmd.name}({cmd.shortcut})"
+                action = menu.addAction(name)
+                if cmd.shortcut:
+                    action.setShortcut(cmd.shortcut)
                 action.triggered.connect(
                     lambda checked, c=cmd, p=path: self._run_custom_command(c, p)
                 )
@@ -191,8 +200,7 @@ class FolderTreeView(QTreeView):
         from commander.views.viewer import FullscreenImageViewer
         from commander.core.image_loader import ALL_IMAGE_FORMATS
 
-        # Find first image in directory
-        images = sorted([p for p in path.iterdir() if p.suffix.lower() in ALL_IMAGE_FORMATS])
+        images = self._collect_images_from_dir(path, ALL_IMAGE_FORMATS)
         if not images:
             return
 
@@ -200,6 +208,47 @@ class FolderTreeView(QTreeView):
             self._viewer = FullscreenImageViewer(self.window())
 
         self._viewer.show_image(images[0], images)
+
+    def _collect_images_from_dir(self, path: Path, formats: set) -> list[Path]:
+        """Collect images from directory, optionally including subdirectories."""
+        from PySide6.QtWidgets import QMessageBox
+        from commander.utils.i18n import tr
+
+        # Check if there are subdirectories with images
+        subdirs = [p for p in path.iterdir() if p.is_dir()]
+        has_subdirs_with_images = False
+
+        for subdir in subdirs:
+            try:
+                if any(p.suffix.lower() in formats for p in subdir.iterdir() if p.is_file()):
+                    has_subdirs_with_images = True
+                    break
+            except PermissionError:
+                continue
+
+        include_subdirs = False
+        if has_subdirs_with_images:
+            reply = QMessageBox.question(
+                self,
+                tr("image_viewer_subfolders_title"),
+                tr("image_viewer_subfolders_question"),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            include_subdirs = reply == QMessageBox.StandardButton.Yes
+
+        if include_subdirs:
+            # Recursively collect all images
+            images = []
+            for p in sorted(path.rglob("*")):
+                if p.is_file() and p.suffix.lower() in formats:
+                    images.append(p)
+            return images
+        else:
+            # Only current directory
+            return sorted(
+                [p for p in path.iterdir() if p.is_file() and p.suffix.lower() in formats]
+            )
 
     def _copy_path(self, path: Path) -> None:
         """Copy path to clipboard."""
@@ -223,3 +272,33 @@ class FolderTreeView(QTreeView):
             subprocess.run(["explorer", "/select,", str(path)])
         else:
             subprocess.run(["xdg-open", str(path.parent)])
+
+    def get_selected_path(self) -> Path | None:
+        """Get currently selected folder path."""
+        index = self.currentIndex()
+        if index.isValid():
+            return Path(self._model.filePath(index))
+        return None
+
+    def focusInEvent(self, event: QFocusEvent) -> None:
+        """Handle focus in - update border style."""
+        super().focusInEvent(event)
+        self._update_focus_style()
+
+    def focusOutEvent(self, event: QFocusEvent) -> None:
+        """Handle focus out - update border style."""
+        super().focusOutEvent(event)
+        self._update_focus_style()
+
+    def _update_focus_style(self) -> None:
+        """Update border style based on focus and theme."""
+        from commander.utils.themes import get_theme_manager
+
+        theme = get_theme_manager().get_current_theme()
+
+        # Only apply focus border for retro theme
+        # Use dark cyan/teal like classic MDIR style
+        if theme.name == "retro" and self.hasFocus():
+            self.setStyleSheet("FolderTreeView { border: 2px solid #008080; }")
+        else:
+            self.setStyleSheet("")
