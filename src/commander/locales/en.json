@@ -2,6 +2,7 @@
   "app_name": "Honey Commander",
 
   "menu_file": "File",
+  "new_window": "New Window",
   "menu_help": "Help",
   "new_folder": "New Folder",
   "new_file": "New File",
@@ -156,5 +157,7 @@
   "new_version_available": "A new version is available",
   "update_download_prompt": "Would you like to go to the download page?",
   "download": "Download",
-  "later": "Later"
+  "later": "Later",
+  "check_for_updates": "Check for Updates",
+  "no_updates_available": "You are using the latest version."
 }

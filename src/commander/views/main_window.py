@@ -60,7 +60,7 @@ class MainWindow(QMainWindow):
         self._load_settings()
         self._check_for_updates()
 
-        self.setWindowTitle(tr("app_name"))
+        self._update_window_title()
 
         # Keep reference to update thread
         self._update_thread = None
@@ -119,6 +119,13 @@ class MainWindow(QMainWindow):
 
         # File menu
         file_menu = menubar.addMenu(tr("menu_file"))
+
+        new_window_action = QAction(tr("new_window"), self)
+        new_window_action.setShortcut(QKeySequence("Ctrl+N"))
+        new_window_action.triggered.connect(self._open_new_window)
+        file_menu.addAction(new_window_action)
+
+        file_menu.addSeparator()
 
         new_folder_action = QAction(tr("new_folder"), self)
         new_folder_action.setShortcut(QKeySequence("Ctrl+Shift+N"))
@@ -210,6 +217,10 @@ class MainWindow(QMainWindow):
         shortcuts_action.setShortcut(QKeySequence("F1"))
         shortcuts_action.triggered.connect(self._show_shortcuts)
         help_menu.addAction(shortcuts_action)
+
+        check_updates_action = QAction(tr("check_for_updates") + "...", self)
+        check_updates_action.triggered.connect(self._manual_check_for_updates)
+        help_menu.addAction(check_updates_action)
 
         help_menu.addSeparator()
 
@@ -342,6 +353,9 @@ class MainWindow(QMainWindow):
 
         # File list selection -> preview update
         self._file_list.item_selected.connect(self._on_item_selected)
+
+        # File list request new window
+        self._file_list.request_new_window.connect(self._open_new_window_at)
 
         # Address bar navigation
         self._address_bar.path_changed.connect(self._navigate_to)
@@ -631,13 +645,26 @@ class MainWindow(QMainWindow):
                 self._status_bar.showMessage(f"Error creating folder: {name}")
 
     def _check_for_updates(self):
-        """Check for updates in background."""
+        """Check for updates in background (silent)."""
         self._update_thread = check_for_updates_async(self._on_update_check_complete)
 
+    def _manual_check_for_updates(self):
+        """Manually check for updates (shows result even if up to date)."""
+        self._update_thread = check_for_updates_async(self._on_manual_update_check_complete)
+
     def _on_update_check_complete(self, release_info: "ReleaseInfo | None"):
-        """Handle update check result."""
+        """Handle automatic update check result (silent if no update)."""
         if release_info:
             self._show_update_notification(release_info)
+
+    def _on_manual_update_check_complete(self, release_info: "ReleaseInfo | None"):
+        """Handle manual update check result (always shows message)."""
+        if release_info:
+            self._show_update_notification(release_info)
+        else:
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.information(self, tr("check_for_updates"), tr("no_updates_available"))
 
     def _show_update_notification(self, release_info: "ReleaseInfo"):
         """Show update available notification."""
@@ -657,3 +684,25 @@ class MainWindow(QMainWindow):
 
         if msg.clickedButton() == download_btn:
             webbrowser.open(release_info.html_url)
+
+    def _update_window_title(self):
+        """Update window title with version info."""
+        from commander import __version__, __build_date__
+
+        title = tr("app_name")
+        if __version__:
+            title += f" v{__version__}"
+        if __build_date__:
+            title += f" ({__build_date__})"
+        self.setWindowTitle(title)
+
+    def _open_new_window(self):
+        """Open a new window at current path."""
+        self._open_new_window_at(self._current_path)
+
+    def _open_new_window_at(self, path: Path):
+        """Open a new window at specified path."""
+        from commander.__main__ import get_window_manager
+
+        window = get_window_manager().create_window(path)
+        window.show()

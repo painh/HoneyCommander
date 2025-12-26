@@ -2,6 +2,7 @@
   "app_name": "꿀 커맨더",
 
   "menu_file": "파일",
+  "new_window": "새 창",
   "menu_help": "도움말",
   "new_folder": "새 폴더",
   "new_file": "새 파일",
@@ -156,5 +157,7 @@
   "new_version_available": "새 버전이 있습니다",
   "update_download_prompt": "다운로드 페이지로 이동하시겠습니까?",
   "download": "다운로드",
-  "later": "나중에"
+  "later": "나중에",
+  "check_for_updates": "업데이트 확인",
+  "no_updates_available": "현재 최신 버전입니다."
 }

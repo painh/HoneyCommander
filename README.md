@@ -2,6 +2,8 @@
 
 크로스 플랫폼 파일 탐색기 + 꿀뷰 스타일 이미지 뷰어
 
+[![Tests](https://github.com/painh/HoneyCommander/actions/workflows/test.yml/badge.svg)](https://github.com/painh/HoneyCommander/actions/workflows/test.yml)
+[![Release](https://github.com/painh/HoneyCommander/actions/workflows/release.yml/badge.svg)](https://github.com/painh/HoneyCommander/actions/workflows/release.yml)
 ![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
 ![PySide6](https://img.shields.io/badge/PySide6-Qt6-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
