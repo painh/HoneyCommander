@@ -150,5 +150,11 @@
   "shortcut_select_image": "이미지 선택",
   "shortcut_open_in_explorer": "파일 관리자에서 보기",
   "shortcut_copy_clipboard": "클립보드로 복사",
-  "shortcut_open_editor": "편집기에서 열기"
+  "shortcut_open_editor": "편집기에서 열기",
+
+  "update_available": "업데이트 있음",
+  "new_version_available": "새 버전이 있습니다",
+  "update_download_prompt": "다운로드 페이지로 이동하시겠습니까?",
+  "download": "다운로드",
+  "later": "나중에"
 }

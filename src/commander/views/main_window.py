@@ -34,6 +34,7 @@ from commander.core.file_operations import FileOperations
 from commander.core.undo_manager import get_undo_manager
 from commander.utils.settings import Settings
 from commander.utils.i18n import tr
+from commander.utils.update_checker import check_for_updates_async, ReleaseInfo
 
 
 class MainWindow(QMainWindow):
@@ -57,8 +58,12 @@ class MainWindow(QMainWindow):
         self._setup_shortcuts()
         self._connect_signals()
         self._load_settings()
+        self._check_for_updates()
 
         self.setWindowTitle(tr("app_name"))
+
+        # Keep reference to update thread
+        self._update_thread = None
 
     def _setup_ui(self):
         """Setup the main UI layout."""
@@ -624,3 +629,31 @@ class MainWindow(QMainWindow):
                 self._status_bar.showMessage(f"Created folder: {name}")
             else:
                 self._status_bar.showMessage(f"Error creating folder: {name}")
+
+    def _check_for_updates(self):
+        """Check for updates in background."""
+        self._update_thread = check_for_updates_async(self._on_update_check_complete)
+
+    def _on_update_check_complete(self, release_info: "ReleaseInfo | None"):
+        """Handle update check result."""
+        if release_info:
+            self._show_update_notification(release_info)
+
+    def _show_update_notification(self, release_info: "ReleaseInfo"):
+        """Show update available notification."""
+        from PySide6.QtWidgets import QMessageBox
+        import webbrowser
+
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setWindowTitle(tr("update_available"))
+        msg.setText(f"{tr('new_version_available')}: v{release_info.version}")
+        msg.setInformativeText(tr("update_download_prompt"))
+
+        download_btn = msg.addButton(tr("download"), QMessageBox.ButtonRole.AcceptRole)
+        msg.addButton(tr("later"), QMessageBox.ButtonRole.RejectRole)
+
+        msg.exec()
+
+        if msg.clickedButton() == download_btn:
+            webbrowser.open(release_info.html_url)
