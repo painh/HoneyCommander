@@ -118,6 +118,9 @@
   "settings_max_results": "Max search results:",
   "settings_cache_size": "Thumbnail cache size:",
   "settings_undo_stack": "Undo stack size:",
+  "settings_debug": "Debug",
+  "settings_logging_enabled": "Enable logging:",
+  "settings_log_path": "Log file:",
 
   "shortcuts": "Keyboard Shortcuts",
   "about": "About",

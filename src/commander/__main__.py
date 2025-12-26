@@ -1,25 +1,26 @@
 """Entry point for Commander application."""
 
 import sys
-import traceback
 from pathlib import Path
 
 
-def setup_crash_log():
-    """Setup crash logging for frozen apps."""
-    if getattr(sys, "frozen", False):
-        log_path = Path.home() / "HoneyCommander_crash.log"
+def setup_logging():
+    """Setup application logging."""
+    from commander.utils.logger import setup_logging as init_logging
 
-        def exception_hook(exc_type, exc_value, exc_tb):
-            with open(log_path, "w", encoding="utf-8") as f:
-                f.write(f"Crash at: {__import__('datetime').datetime.now()}\n\n")
-                f.write("".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
-            sys.__excepthook__(exc_type, exc_value, exc_tb)
+    logger = init_logging()
 
-        sys.excepthook = exception_hook
+    # Setup exception hook to log crashes
+    def exception_hook(exc_type, exc_value, exc_tb):
+        logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_tb))
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = exception_hook
+    return logger
 
 
-setup_crash_log()
+# Initialize logging early
+_logger = setup_logging()
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon

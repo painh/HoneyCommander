@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QTabWidget,
     QWidget,
+    QCheckBox,
 )
 
 from commander.utils.settings import Settings
@@ -125,6 +126,22 @@ class SettingsDialog(QDialog):
         perf_form.addRow(tr("settings_undo_stack"), self._undo_stack_spin)
 
         perf_layout.addWidget(perf_group)
+
+        # Debug group
+        debug_group = QGroupBox(tr("settings_debug"))
+        debug_form = QFormLayout(debug_group)
+
+        self._logging_checkbox = QCheckBox()
+        debug_form.addRow(tr("settings_logging_enabled"), self._logging_checkbox)
+
+        from commander.utils.logger import get_log_path
+
+        log_path_label = QLabel(str(get_log_path()))
+        log_path_label.setStyleSheet("color: #888; font-size: 11px;")
+        log_path_label.setWordWrap(True)
+        debug_form.addRow(tr("settings_log_path"), log_path_label)
+
+        perf_layout.addWidget(debug_group)
         perf_layout.addStretch()
         tabs.addTab(perf_tab, tr("settings_performance"))
 
@@ -166,6 +183,9 @@ class SettingsDialog(QDialog):
         self._cache_size_spin.setValue(self._settings.load_thumbnail_cache_size())
         self._undo_stack_spin.setValue(self._settings.load_undo_stack_size())
 
+        # Debug
+        self._logging_checkbox.setChecked(self._settings.load_logging_enabled())
+
     def _save_and_accept(self):
         """Save settings and close."""
         # Language
@@ -186,5 +206,10 @@ class SettingsDialog(QDialog):
         # Performance
         self._settings.save_thumbnail_cache_size(self._cache_size_spin.value())
         self._settings.save_undo_stack_size(self._undo_stack_spin.value())
+
+        # Debug - use logger module to properly toggle file logging
+        from commander.utils.logger import set_logging_enabled
+
+        set_logging_enabled(self._logging_checkbox.isChecked())
 
         self.accept()

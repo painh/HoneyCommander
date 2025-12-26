@@ -203,3 +203,12 @@ class Settings:
     def load_search_max_results(self) -> int:
         """Load search max results. Default 100."""
         return self._settings.value("search/max_results", 100, type=int)
+
+    # Logging enabled
+    def save_logging_enabled(self, enabled: bool):
+        """Save logging enabled setting."""
+        self._settings.setValue("debug/logging_enabled", enabled)
+
+    def load_logging_enabled(self) -> bool:
+        """Load logging enabled setting. Default True."""
+        return self._settings.value("debug/logging_enabled", True, type=bool)

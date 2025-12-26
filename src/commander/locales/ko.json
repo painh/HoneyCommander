@@ -118,6 +118,9 @@
   "settings_max_results": "검색 결과 최대 개수:",
   "settings_cache_size": "썸네일 캐시 개수:",
   "settings_undo_stack": "실행취소 스택 크기:",
+  "settings_debug": "디버그",
+  "settings_logging_enabled": "로그 활성화:",
+  "settings_log_path": "로그 파일:",
 
   "shortcuts": "키보드 단축키",
   "about": "정보",
