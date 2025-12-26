@@ -260,18 +260,27 @@ class TestRename:
         assert new_path.is_dir()
         assert (new_path / "nested.txt").exists()
 
-    def test_rename_to_existing_overwrites(self, file_ops: FileOperations, source_dir: Path):
-        """Test renaming to existing name overwrites (OS behavior)."""
+    def test_rename_to_existing_fails_or_overwrites(
+        self, file_ops: FileOperations, source_dir: Path
+    ):
+        """Test renaming to existing name - behavior varies by OS."""
+        import sys
+
         src_file = source_dir / "file1.txt"
         original_content = src_file.read_text()
 
         new_path = file_ops.rename(src_file, "file2.txt")
 
-        # OS allows rename to overwrite existing file
-        assert new_path == source_dir / "file2.txt"
-        assert new_path.exists()
-        assert new_path.read_text() == original_content
-        assert not src_file.exists()
+        if sys.platform == "win32":
+            # Windows: rename to existing file fails
+            assert new_path is None
+            assert src_file.exists()
+        else:
+            # macOS/Linux: rename overwrites existing file
+            assert new_path == source_dir / "file2.txt"
+            assert new_path.exists()
+            assert new_path.read_text() == original_content
+            assert not src_file.exists()
 
 
 class TestCreateFolder:
