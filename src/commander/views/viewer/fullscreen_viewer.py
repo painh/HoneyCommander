@@ -363,8 +363,9 @@ class FullscreenImageViewer(QWidget):
         # Clear existing
         while self._frame_container_layout.count():
             item = self._frame_container_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = item.widget() if item else None
+            if widget:
+                widget.deleteLater()
 
         # Create placeholders
         thumb_size = self._anim.thumb_size
@@ -387,9 +388,9 @@ class FullscreenImageViewer(QWidget):
         """Handle thumbnail ready from background thread."""
         if frame_index < self._frame_container_layout.count():
             item = self._frame_container_layout.itemAt(frame_index)
-            if item and item.widget():
-                widget = item.widget()
-                widget.setPixmap(pixmap)  # type: ignore
+            widget = item.widget() if item else None
+            if widget and isinstance(widget, QLabel):
+                widget.setPixmap(pixmap)
                 if frame_index == self._anim.current_frame:
                     widget.setStyleSheet("border: 2px solid #0078d4; background: #333;")
 
@@ -422,13 +423,16 @@ class FullscreenImageViewer(QWidget):
         current = self._anim.current_frame
         for i in range(self._frame_container_layout.count()):
             item = self._frame_container_layout.itemAt(i)
-            if item and item.widget():
-                widget = item.widget()
-                if widget.property("frame_index") == current:
-                    widget.setStyleSheet("border: 2px solid #0078d4; background: #333;")
-                    self._frame_scroll.ensureWidgetVisible(widget)
-                else:
-                    widget.setStyleSheet("border: 2px solid transparent; background: #333;")
+            if item is None:
+                continue
+            widget = item.widget()
+            if widget is None:
+                continue
+            if widget.property("frame_index") == current:
+                widget.setStyleSheet("border: 2px solid #0078d4; background: #333;")
+                self._frame_scroll.ensureWidgetVisible(widget)
+            else:
+                widget.setStyleSheet("border: 2px solid transparent; background: #333;")
 
     def _update_frame_info(self) -> None:
         """Update frame info label."""
@@ -481,14 +485,17 @@ class FullscreenImageViewer(QWidget):
     # ══════════════════════════════════════════════════════════════════════════
 
     def _get_fit_scale(self) -> float:
-        """Calculate scale to fit image to screen."""
+        """Calculate scale to fit image to window."""
         if self._original_pixmap is None or self._original_pixmap.isNull():
             return 1.0
         transformed = self._get_transformed_pixmap()
-        screen_size = QApplication.primaryScreen().size()
+        # Use scroll area size (actual viewport) instead of screen size
+        viewport_size = self._scroll_area.size()
+        # Account for info label height
+        available_height = viewport_size.height()
         return min(
-            screen_size.width() / transformed.width(),
-            screen_size.height() / transformed.height(),
+            viewport_size.width() / transformed.width(),
+            available_height / transformed.height(),
         )
 
     def _get_transformed_pixmap(self) -> QPixmap:
@@ -1085,10 +1092,38 @@ class FullscreenImageViewer(QWidget):
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         delta = event.angleDelta().y()
-        if delta > 0:
-            self._prev_image()
-        elif delta < 0:
-            self._next_image()
+
+        # Check if image is larger than viewport (scrollable)
+        vbar = self._scroll_area.verticalScrollBar()
+        can_scroll = vbar.maximum() > 0
+
+        if can_scroll:
+            # Image is larger than viewport - scroll first
+            current_pos = vbar.value()
+            if delta > 0:
+                # Scrolling up
+                if current_pos > vbar.minimum():
+                    # Can still scroll up
+                    vbar.setValue(current_pos - 100)
+                    return
+                else:
+                    # At top - go to previous image
+                    self._prev_image()
+            else:
+                # Scrolling down
+                if current_pos < vbar.maximum():
+                    # Can still scroll down
+                    vbar.setValue(current_pos + 100)
+                    return
+                else:
+                    # At bottom - go to next image
+                    self._next_image()
+        else:
+            # Image fits in viewport - navigate images directly
+            if delta > 0:
+                self._prev_image()
+            elif delta < 0:
+                self._next_image()
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:

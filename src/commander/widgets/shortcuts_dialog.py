@@ -67,8 +67,8 @@ class ShortcutsDialog(QDialog):
                 ("⌫" if sys.platform == "darwin" else "Backspace", tr("shortcut_go_up")),
                 (f"{mod}+↑", tr("shortcut_go_up")),
                 (f"{mod}+↓", tr("shortcut_open_item")),
-                (f"{alt}+←", tr("shortcut_go_back")),
-                (f"{alt}+→", tr("shortcut_go_forward")),
+                (f"{mod}+←" if sys.platform == "darwin" else f"{alt}+←", tr("shortcut_go_back")),
+                (f"{mod}+→" if sys.platform == "darwin" else f"{alt}+→", tr("shortcut_go_forward")),
             ],
         )
 

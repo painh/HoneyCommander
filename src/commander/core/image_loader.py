@@ -178,8 +178,20 @@ def _load_svg(path: Path) -> QPixmap:
         if not renderer.isValid():
             return QPixmap()
 
-        # Render at reasonable size (max 4096px)
+        # Get size, use viewBox if defaultSize is invalid
         size = renderer.defaultSize()
+        if size.width() <= 0 or size.height() <= 0:
+            # Try viewBox
+            view_box = renderer.viewBox()
+            if view_box.isValid() and view_box.width() > 0 and view_box.height() > 0:
+                size = view_box.size()
+            else:
+                # Fallback to reasonable default
+                from PySide6.QtCore import QSize
+
+                size = QSize(512, 512)
+
+        # Render at reasonable size (max 4096px)
         if size.width() > 4096 or size.height() > 4096:
             size.scale(4096, 4096, Qt.AspectRatioMode.KeepAspectRatio)
 

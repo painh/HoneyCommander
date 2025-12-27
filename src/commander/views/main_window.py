@@ -327,12 +327,18 @@ class MainWindow(QMainWindow):
         backspace_shortcut = QShortcut(QKeySequence("Backspace"), self)
         backspace_shortcut.activated.connect(self._go_up)
 
-        # Alt+Left: Back
-        back_shortcut = QShortcut(QKeySequence("Alt+Left"), self)
+        # Back: Cmd+Left (macOS) / Alt+Left (others)
+        if sys.platform == "darwin":
+            back_shortcut = QShortcut(QKeySequence("Ctrl+Left"), self)  # Cmd = Ctrl in Qt
+        else:
+            back_shortcut = QShortcut(QKeySequence("Alt+Left"), self)
         back_shortcut.activated.connect(self._go_back)
 
-        # Alt+Right: Forward
-        forward_shortcut = QShortcut(QKeySequence("Alt+Right"), self)
+        # Forward: Cmd+Right (macOS) / Alt+Right (others)
+        if sys.platform == "darwin":
+            forward_shortcut = QShortcut(QKeySequence("Ctrl+Right"), self)
+        else:
+            forward_shortcut = QShortcut(QKeySequence("Alt+Right"), self)
         forward_shortcut.activated.connect(self._go_forward)
 
         # Cmd+Up (macOS) / Ctrl+Up: Go to parent folder
@@ -720,7 +726,11 @@ class MainWindow(QMainWindow):
         else:
             from PySide6.QtWidgets import QMessageBox
 
-            QMessageBox.information(self, tr("check_for_updates"), tr("no_updates_available"))
+            msg = QMessageBox(self)
+            msg.setWindowTitle(tr("check_for_updates"))
+            msg.setText(tr("no_updates_available"))
+            msg.setIconPixmap(self.windowIcon().pixmap(64, 64))
+            msg.exec()
 
     def _show_update_notification(self, release_info: "ReleaseInfo"):
         """Show update available notification."""
@@ -728,7 +738,7 @@ class MainWindow(QMainWindow):
         import webbrowser
 
         msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setIconPixmap(self.windowIcon().pixmap(64, 64))
         msg.setWindowTitle(tr("update_available"))
         msg.setText(f"{tr('new_version_available')}: v{release_info.version}")
         msg.setInformativeText(tr("update_download_prompt"))

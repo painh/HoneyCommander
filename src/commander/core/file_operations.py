@@ -7,9 +7,9 @@ import threading
 from pathlib import Path
 from typing import Callable
 from enum import Enum
+from urllib.parse import unquote, urlparse
 
-import send2trash
-
+from commander.core.trash_handler import trash_handler
 from commander.core.undo_manager import get_undo_manager
 
 
@@ -54,8 +54,48 @@ class FileOperations:
         self._clipboard_mode = "cut"
 
     def has_clipboard(self) -> bool:
-        """Check if clipboard has content."""
-        return len(self._clipboard) > 0
+        """Check if clipboard has content (internal or system)."""
+        if len(self._clipboard) > 0:
+            return True
+        # Check system clipboard for files
+        return len(self.get_system_clipboard_files()) > 0
+
+    def get_system_clipboard_files(self) -> list[Path]:
+        """Get files from system clipboard (e.g., Finder copy)."""
+        try:
+            from PySide6.QtWidgets import QApplication
+
+            clipboard = QApplication.clipboard()
+            mime_data = clipboard.mimeData()
+
+            if mime_data is None:
+                return []
+
+            paths: list[Path] = []
+
+            # Check for file URLs (macOS Finder, Linux file managers)
+            if mime_data.hasUrls():
+                for url in mime_data.urls():
+                    if url.isLocalFile():
+                        file_path = Path(url.toLocalFile())
+                        if file_path.exists():
+                            paths.append(file_path)
+
+            # macOS: Also check for NSFilenamesPboardType via text/uri-list
+            if not paths and mime_data.hasFormat("text/uri-list"):
+                raw_data = mime_data.data("text/uri-list")
+                uri_list = bytes(raw_data.data()).decode("utf-8")
+                for line in uri_list.strip().split("\n"):
+                    line = line.strip()
+                    if line.startswith("file://"):
+                        parsed = urlparse(line)
+                        file_path = Path(unquote(parsed.path))
+                        if file_path.exists() and file_path not in paths:
+                            paths.append(file_path)
+
+            return paths
+        except Exception:
+            return []
 
     def get_clipboard_info(self) -> tuple[list[Path], str]:
         """Get clipboard contents and mode."""
@@ -77,9 +117,10 @@ class FileOperations:
 
     def find_paste_conflicts(self, destination: Path) -> list[tuple[Path, Path]]:
         """Find conflicts for clipboard paste operation."""
-        if not self._clipboard:
+        clipboard_files = self._clipboard if self._clipboard else self.get_system_clipboard_files()
+        if not clipboard_files:
             return []
-        return self.find_conflicts(self._clipboard, destination)
+        return self.find_conflicts(clipboard_files, destination)
 
     def paste(
         self,
@@ -92,7 +133,11 @@ class FileOperations:
         progress_callback(current, total, current_file) -> should_cancel
         conflict_resolution: How to handle existing files
         """
-        if not self._clipboard:
+        # Use internal clipboard if available, otherwise check system clipboard
+        clipboard_files = self._clipboard if self._clipboard else self.get_system_clipboard_files()
+        clipboard_mode = self._clipboard_mode if self._clipboard else "copy"
+
+        if not clipboard_files:
             return 0
 
         if conflict_resolution == ConflictResolution.CANCEL:
@@ -101,7 +146,7 @@ class FileOperations:
         # Calculate total size for progress
         total_size = 0
         files_to_copy = []
-        for src in self._clipboard:
+        for src in clipboard_files:
             if src.exists():
                 if src.is_dir():
                     for f in src.rglob("*"):
@@ -117,7 +162,7 @@ class FileOperations:
         sources_for_undo = []
         dests_for_undo = []
 
-        for src in self._clipboard:
+        for src in clipboard_files:
             try:
                 if not src.exists():
                     continue
@@ -137,7 +182,7 @@ class FileOperations:
                     elif conflict_resolution == ConflictResolution.RENAME:
                         dst = self._get_unique_path(dst)
 
-                if self._clipboard_mode == "cut":
+                if clipboard_mode == "cut":
                     if progress_callback:
                         size = self._get_size(src)
                         if progress_callback(copied_size, total_size, src.name):
@@ -166,12 +211,13 @@ class FileOperations:
         # Record for undo
         if count > 0:
             undo_mgr = get_undo_manager()
-            if self._clipboard_mode == "cut":
+            if clipboard_mode == "cut":
                 undo_mgr.record_move(sources_for_undo, dests_for_undo)
             else:
                 undo_mgr.record_copy(sources_for_undo, dests_for_undo)
 
-        if self._clipboard_mode == "cut":
+        # Only clear internal clipboard if it was a cut operation from internal clipboard
+        if clipboard_mode == "cut" and self._clipboard:
             self._clipboard.clear()
 
         return count
@@ -330,27 +376,35 @@ class FileOperations:
     def delete(self, paths: list[Path], use_trash: bool = True) -> int:
         """Delete files (move to trash by default)."""
         count = 0
-        deleted_paths = []
+        deleted_paths: list[Path] = []
+        trash_paths: list[Path | None] = []
+        handler = trash_handler()
+
         for path in paths:
             try:
                 if not path.exists():
                     continue
 
                 if use_trash:
-                    send2trash.send2trash(str(path))
+                    result = handler.trash(path)
+                    if result.success:
+                        deleted_paths.append(path)
+                        trash_paths.append(result.trash_path)
+                        count += 1
                 else:
                     if path.is_dir():
                         shutil.rmtree(str(path))
                     else:
                         path.unlink()
-                deleted_paths.append(path)
-                count += 1
+                    deleted_paths.append(path)
+                    trash_paths.append(None)  # No restore for permanent delete
+                    count += 1
             except OSError:
                 pass
 
-        # Record for undo (note: delete from trash is not supported)
+        # Record for undo with trash paths for restore support
         if count > 0:
-            get_undo_manager().record_delete(deleted_paths)
+            get_undo_manager().record_delete(deleted_paths, trash_paths)
 
         return count
 

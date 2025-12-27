@@ -159,19 +159,52 @@ class TestUndoCreateFolder:
 
 
 class TestUndoDelete:
-    """Test that delete cannot be undone (items in trash)."""
+    """Test that delete can be undone (restored from trash)."""
 
-    def test_delete_cannot_undo(self, undo_manager: UndoManager, source_dir: Path):
-        """Test that delete records but cannot undo."""
-        deleted_file = source_dir / "file1.txt"
+    def test_delete_can_undo_with_trash_path(self, undo_manager: UndoManager, source_dir: Path):
+        """Test that delete can be undone when trash path is available."""
+        from commander.core.trash_handler import trash_handler
 
-        # Record delete (file already gone)
-        undo_manager.record_delete([deleted_file])
+        # Create a file to delete
+        test_file = source_dir / "to_delete.txt"
+        test_file.write_text("test content")
 
-        # Can "undo" but it won't restore
-        result = undo_manager.undo()
+        # Trash the file and get trash path
+        handler = trash_handler()
+        result = handler.trash(test_file)
+        assert result.success
+        assert not test_file.exists()
 
-        assert not result  # Should return False
+        # Record delete with trash path
+        undo_manager.record_delete([test_file], [result.trash_path])
+
+        # Undo should restore the file
+        undo_result = undo_manager.undo()
+        assert undo_result
+        assert test_file.exists()
+        assert test_file.read_text() == "test content"
+
+    def test_delete_redo(self, undo_manager: UndoManager, source_dir: Path):
+        """Test that delete can be redone after undo."""
+        from commander.core.trash_handler import trash_handler
+
+        # Create a file to delete
+        test_file = source_dir / "to_delete_redo.txt"
+        test_file.write_text("redo test")
+
+        # Trash the file
+        handler = trash_handler()
+        result = handler.trash(test_file)
+        undo_manager.record_delete([test_file], [result.trash_path])
+
+        # Undo
+        undo_manager.undo()
+        assert test_file.exists()
+
+        # Redo should delete again
+        redo_result = undo_manager.redo()
+        assert redo_result
+        assert not test_file.exists()
 
 
 class TestUndoStack:

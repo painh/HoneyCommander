@@ -4,7 +4,7 @@ import sys
 import subprocess
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QDir, QModelIndex, QPoint
+from PySide6.QtCore import Qt, Signal, QDir, QModelIndex, QPoint, QObject, QEvent
 from PySide6.QtWidgets import (
     QTreeView,
     QFileSystemModel,
@@ -12,7 +12,38 @@ from PySide6.QtWidgets import (
     QMenu,
     QApplication,
 )
-from PySide6.QtGui import QDragEnterEvent, QDropEvent, QFocusEvent
+from PySide6.QtGui import QDragEnterEvent, QDropEvent, QFocusEvent, QKeyEvent
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import Callable
+
+
+class _MenuShortcutFilter(QObject):
+    """Event filter to handle keyboard shortcuts in context menu."""
+
+    def __init__(
+        self,
+        menu: QMenu,
+        shortcut_actions: dict,
+        run_command: "Callable",
+    ):
+        super().__init__(menu)
+        self._menu = menu
+        self._shortcut_actions = shortcut_actions
+        self._run_command = run_command
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.KeyPress:
+            key_event: QKeyEvent = event  # type: ignore[assignment]
+            text = key_event.text().upper()
+            if text in self._shortcut_actions:
+                cmd, path = self._shortcut_actions[text]
+                self._menu.close()
+                self._run_command(cmd, path)
+                return True
+        return super().eventFilter(obj, event)
 
 
 class FolderTreeView(QTreeView):
@@ -149,6 +180,7 @@ class FolderTreeView(QTreeView):
         new_window_action.triggered.connect(lambda: self.request_new_window.emit(path))
 
         # Custom commands
+        shortcut_actions: dict[str, tuple] = {}
         custom_cmds = get_custom_commands_manager().get_commands_for_path(path)
         if custom_cmds:
             menu.addSeparator()
@@ -157,12 +189,21 @@ class FolderTreeView(QTreeView):
                 name = cmd.name
                 if cmd.shortcut:
                     name = f"{cmd.name}({cmd.shortcut})"
+                    shortcut_actions[cmd.shortcut.upper()] = (cmd, path)
                 action = menu.addAction(name)
-                if cmd.shortcut:
-                    action.setShortcut(cmd.shortcut)
                 action.triggered.connect(
                     lambda checked, c=cmd, p=path: self._run_custom_command(c, p)
                 )
+
+        menu.addSeparator()
+
+        # New Folder
+        new_folder_action = menu.addAction("New Folder")
+        new_folder_action.triggered.connect(lambda: self._create_new_folder(path))
+
+        # New File
+        new_file_action = menu.addAction("New File")
+        new_file_action.triggered.connect(lambda: self._create_new_file(path))
 
         menu.addSeparator()
 
@@ -181,6 +222,12 @@ class FolderTreeView(QTreeView):
             reveal_action = menu.addAction("Open in File Manager")
         reveal_action.triggered.connect(lambda: self._reveal_in_finder(path))
 
+        # Install key event filter for custom command shortcuts
+        if shortcut_actions:
+            menu.installEventFilter(
+                _MenuShortcutFilter(menu, shortcut_actions, self._run_custom_command)
+            )
+
         menu.exec(self.mapToGlobal(pos))
 
     def _run_custom_command(self, cmd, path: Path) -> None:
@@ -195,19 +242,35 @@ class FolderTreeView(QTreeView):
         else:
             cmd.execute(path)
 
+    def _is_viewer_valid(self) -> bool:
+        """Check if the viewer instance is still valid."""
+        try:
+            if not hasattr(self, "_viewer") or self._viewer is None:
+                return False
+            # Try to access a property to check if C++ object is still alive
+            self._viewer.isVisible()
+            return True
+        except RuntimeError:
+            return False
+
+    def _get_or_create_viewer(self):
+        """Get existing viewer or create a new one."""
+        from commander.views.viewer import FullscreenImageViewer
+
+        if not self._is_viewer_valid():
+            self._viewer = FullscreenImageViewer(self.window())
+        return self._viewer
+
     def _open_builtin_image_viewer(self, path: Path) -> None:
         """Open built-in image viewer for directory."""
-        from commander.views.viewer import FullscreenImageViewer
         from commander.core.image_loader import ALL_IMAGE_FORMATS
 
         images = self._collect_images_from_dir(path, ALL_IMAGE_FORMATS)
         if not images:
             return
 
-        if not hasattr(self, "_viewer") or self._viewer is None:
-            self._viewer = FullscreenImageViewer(self.window())
-
-        self._viewer.show_image(images[0], images)
+        viewer = self._get_or_create_viewer()
+        viewer.show_image(images[0], images)
 
     def _collect_images_from_dir(self, path: Path, formats: set) -> list[Path]:
         """Collect images from directory, optionally including subdirectories."""
@@ -302,3 +365,32 @@ class FolderTreeView(QTreeView):
             self.setStyleSheet("FolderTreeView { border: 2px solid #008080; }")
         else:
             self.setStyleSheet("")
+
+    def _create_new_folder(self, parent_path: Path) -> None:
+        """Create a new folder in the given directory."""
+        from PySide6.QtWidgets import QInputDialog, QMessageBox
+
+        name, ok = QInputDialog.getText(self, "New Folder", "Folder name:", text="New Folder")
+        if ok and name:
+            new_path = parent_path / name
+            try:
+                new_path.mkdir(exist_ok=False)
+            except FileExistsError:
+                QMessageBox.warning(self, "Error", f"Folder '{name}' already exists.")
+            except OSError as e:
+                QMessageBox.warning(self, "Error", f"Cannot create folder: {e}")
+
+    def _create_new_file(self, parent_path: Path) -> None:
+        """Create a new empty file in the given directory."""
+        from PySide6.QtWidgets import QInputDialog, QMessageBox
+
+        name, ok = QInputDialog.getText(self, "New File", "File name:", text="new_file.txt")
+        if ok and name:
+            new_path = parent_path / name
+            try:
+                if new_path.exists():
+                    QMessageBox.warning(self, "Error", f"File '{name}' already exists.")
+                else:
+                    new_path.touch()
+            except OSError as e:
+                QMessageBox.warning(self, "Error", f"Cannot create file: {e}")

@@ -236,10 +236,15 @@ class AnimationController(QObject):
 
     def start_thumbnail_generation(
         self,
-        on_thumbnail_ready: Signal,
-        on_finished: Signal,
+        on_thumbnail_ready,
+        on_finished,
     ) -> None:
-        """Start generating thumbnails in background."""
+        """Start generating thumbnails in background.
+
+        Args:
+            on_thumbnail_ready: Callback (frame_index: int, pixmap: QPixmap) -> None
+            on_finished: Callback () -> None
+        """
         if not self._current_path:
             return
 

@@ -6,10 +6,9 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
 
-import send2trash
-
 from PySide6.QtCore import QObject, Signal
 
+from commander.core.trash_handler import trash_handler
 from commander.utils.settings import Settings
 
 
@@ -91,12 +90,13 @@ class UndoManager(QObject):
         )
         self._push_action(action)
 
-    def record_delete(self, paths: list[Path]):
-        """Record a delete operation."""
+    def record_delete(self, original_paths: list[Path], trash_paths: list[Path | None]):
+        """Record a delete operation with trash locations for restore."""
         action = UndoableAction(
             action_type=ActionType.DELETE,
-            source_paths=paths.copy(),
-            description=f"Delete {len(paths)} item(s)",
+            source_paths=original_paths.copy(),
+            dest_paths=[p for p in trash_paths if p is not None],
+            description=f"Delete {len(original_paths)} item(s)",
         )
         self._push_action(action)
 
@@ -164,9 +164,7 @@ class UndoManager(QObject):
             elif action.action_type == ActionType.MOVE:
                 success = self._undo_move(action)
             elif action.action_type == ActionType.DELETE:
-                # Cannot truly undo delete (items in trash)
-                self.action_performed.emit("Cannot undo delete (items in Trash)")
-                success = False
+                success = self._undo_delete(action)
             elif action.action_type == ActionType.RENAME:
                 success = self._undo_rename(action)
             elif action.action_type == ActionType.CREATE_FOLDER:
@@ -195,6 +193,8 @@ class UndoManager(QObject):
                 success = self._redo_copy(action)
             elif action.action_type == ActionType.MOVE:
                 success = self._redo_move(action)
+            elif action.action_type == ActionType.DELETE:
+                success = self._redo_delete(action)
             elif action.action_type == ActionType.RENAME:
                 success = self._redo_rename(action)
             elif action.action_type == ActionType.CREATE_FOLDER:
@@ -265,6 +265,29 @@ class UndoManager(QObject):
             return True
         return False
 
+    def _undo_delete(self, action: UndoableAction) -> bool:
+        """Undo delete by restoring from trash."""
+        handler = trash_handler()
+        restored = 0
+        for original, trash_path in zip(action.source_paths, action.dest_paths):
+            if trash_path and handler.restore(original, trash_path):
+                restored += 1
+        return restored > 0
+
+    def _redo_delete(self, action: UndoableAction) -> bool:
+        """Redo delete by moving files to trash again."""
+        handler = trash_handler()
+        new_trash_paths = []
+        for original in action.source_paths:
+            if original.exists():
+                result = handler.trash(original)
+                new_trash_paths.append(result.trash_path)
+            else:
+                new_trash_paths.append(None)
+        # Update trash paths for next undo
+        action.dest_paths = [p for p in new_trash_paths if p is not None]
+        return True
+
     def _undo_create_folder(self, action: UndoableAction) -> bool:
         """Undo folder creation by deleting it (if empty)."""
         path = action.source_paths[0]
@@ -274,8 +297,9 @@ class UndoManager(QObject):
                 return True
             except OSError:
                 # Folder not empty - move to trash instead
-                send2trash.send2trash(str(path))
-                return True
+                handler = trash_handler()
+                result = handler.trash(path)
+                return result.success
         return False
 
     def _redo_create_folder(self, action: UndoableAction) -> bool:

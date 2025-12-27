@@ -105,8 +105,25 @@ class CustomCommandsManager:
 
     def _get_default_commands(self) -> list[CustomCommand]:
         """Get default commands based on OS."""
-        # Common image extensions
-        image_exts = ["png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "ico", "psd", "psb"]
+        # Common image extensions (including SVG)
+        image_exts = [
+            "png",
+            "jpg",
+            "jpeg",
+            "gif",
+            "bmp",
+            "webp",
+            "tiff",
+            "tif",
+            "ico",
+            "psd",
+            "psb",
+            "svg",
+            "svgz",
+            "heic",
+            "heif",
+            "avif",
+        ]
         archive_exts = ["zip", "rar", "7z", "tar", "gz", "bz2"]
         # Image viewer supports both images and archives (to view images inside archives)
         image_viewer_exts = image_exts + archive_exts

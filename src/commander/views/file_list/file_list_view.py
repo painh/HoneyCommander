@@ -17,6 +17,8 @@ from PySide6.QtCore import (
     QSize,
     QPoint,
     QTimer,
+    QObject,
+    QEvent,
 )
 from PySide6.QtWidgets import (
     QWidget,
@@ -32,7 +34,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
 )
-from PySide6.QtGui import QColor, QBrush
+from PySide6.QtGui import QColor, QBrush, QKeyEvent
 
 from commander.views.file_list.drop_views import DropEnabledTreeView, DropEnabledListView
 from commander.views.file_list.thumbnail_delegate import ThumbnailDelegate
@@ -40,7 +42,33 @@ from commander.utils.settings import Settings
 from commander.utils.themes import get_file_color
 
 if TYPE_CHECKING:
-    pass
+    from typing import Callable
+
+
+class _MenuShortcutFilter(QObject):
+    """Event filter to handle keyboard shortcuts in context menu."""
+
+    def __init__(
+        self,
+        menu: QMenu,
+        shortcut_actions: dict,
+        run_command: Callable,
+    ):
+        super().__init__(menu)
+        self._menu = menu
+        self._shortcut_actions = shortcut_actions
+        self._run_command = run_command
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.KeyPress:
+            key_event: QKeyEvent = event  # type: ignore[assignment]
+            text = key_event.text().upper()
+            if text in self._shortcut_actions:
+                cmd, path = self._shortcut_actions[text]
+                self._menu.close()
+                self._run_command(cmd, path)
+                return True
+        return super().eventFilter(obj, event)
 
 
 class ColoredFileSystemModel(QFileSystemModel):
@@ -49,7 +77,7 @@ class ColoredFileSystemModel(QFileSystemModel):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
+    def data(self, index, role: int = Qt.ItemDataRole.DisplayRole):  # type: ignore[override]
         """Override data to provide custom foreground colors."""
         if role == Qt.ItemDataRole.ForegroundRole:
             file_path = Path(self.filePath(index))
@@ -337,6 +365,9 @@ class FileListView(QWidget):
 
         selected_paths = self.get_selected_paths()
 
+        # Target path: selected item or current folder (for empty space click)
+        target_path = selected_paths[0] if selected_paths else self._current_path
+
         menu = QMenu(self)
 
         # Open with default app
@@ -351,25 +382,24 @@ class FileListView(QWidget):
                     lambda: self.request_new_window.emit(selected_paths[0])
                 )
 
-            # Custom commands submenu
-            if len(selected_paths) == 1:
-                custom_cmds = get_custom_commands_manager().get_commands_for_path(selected_paths[0])
-                if custom_cmds:
-                    menu.addSeparator()
-                    for cmd in custom_cmds:
-                        # Show shortcut in menu name like "Open in Image Viewer(3)"
-                        name = cmd.name
-                        if cmd.shortcut:
-                            name = f"{cmd.name}({cmd.shortcut})"
-                        action = menu.addAction(name)
-                        if cmd.shortcut:
-                            action.setShortcut(cmd.shortcut)
-                        action.triggered.connect(
-                            lambda checked, c=cmd, p=selected_paths[0]: self._run_custom_command(
-                                c, p
-                            )
-                        )
+        # Custom commands - show for selected file OR current folder (empty space click)
+        shortcut_actions: dict[str, tuple] = {}  # shortcut -> (cmd, path)
+        if target_path and (len(selected_paths) <= 1):
+            custom_cmds = get_custom_commands_manager().get_commands_for_path(target_path)
+            if custom_cmds:
+                menu.addSeparator()
+                for cmd in custom_cmds:
+                    # Show shortcut in menu name like "Open in Image Viewer(3)"
+                    name = cmd.name
+                    if cmd.shortcut:
+                        name = f"{cmd.name}({cmd.shortcut})"
+                        shortcut_actions[cmd.shortcut.upper()] = (cmd, target_path)
+                    action = menu.addAction(name)
+                    action.triggered.connect(
+                        lambda checked, c=cmd, p=target_path: self._run_custom_command(c, p)
+                    )
 
+        if selected_paths:
             # Open With submenu (macOS only for now)
             if sys.platform == "darwin" and len(selected_paths) == 1:
                 open_with_menu = menu.addMenu("Open With")
@@ -447,6 +477,12 @@ class FileListView(QWidget):
         if reveal_path:
             reveal_action.triggered.connect(lambda: self._reveal_in_finder(reveal_path))
 
+        # Install key event filter for custom command shortcuts
+        if shortcut_actions:
+            menu.installEventFilter(
+                _MenuShortcutFilter(menu, shortcut_actions, self._run_custom_command)
+            )
+
         view = self._current_view()
         menu.exec(view.mapToGlobal(pos))
 
@@ -486,9 +522,27 @@ class FileListView(QWidget):
                 f"Failed to extract archive:\n{e}",
             )
 
+    def _is_viewer_valid(self) -> bool:
+        """Check if the viewer instance is still valid."""
+        try:
+            if not hasattr(self, "_viewer") or self._viewer is None:
+                return False
+            # Try to access a property to check if C++ object is still alive
+            self._viewer.isVisible()
+            return True
+        except RuntimeError:
+            return False
+
+    def _get_or_create_viewer(self):
+        """Get existing viewer or create a new one."""
+        from commander.views.viewer import FullscreenImageViewer
+
+        if not self._is_viewer_valid():
+            self._viewer = FullscreenImageViewer(self.window())
+        return self._viewer
+
     def _open_builtin_image_viewer(self, path: Path) -> None:
         """Open built-in image viewer."""
-        from commander.views.viewer import FullscreenImageViewer
         from commander.core.image_loader import ALL_IMAGE_FORMATS
         from commander.core.archive_handler import ArchiveManager
 
@@ -500,19 +554,16 @@ class FileListView(QWidget):
                 return  # No images in directory
         elif ArchiveManager.is_archive(path):
             # Open archive in image viewer - viewer will handle extracting images
-            if not hasattr(self, "_viewer") or self._viewer is None:
-                self._viewer = FullscreenImageViewer(self.window())
-            self._viewer.show_archive(path)
+            viewer = self._get_or_create_viewer()
+            viewer.show_archive(path)
             return
         else:
             # Get all images in same directory
             parent = path.parent
             images = sorted([p for p in parent.iterdir() if p.suffix.lower() in ALL_IMAGE_FORMATS])
 
-        if not hasattr(self, "_viewer") or self._viewer is None:
-            self._viewer = FullscreenImageViewer(self.window())
-
-        self._viewer.show_image(path, images)
+        viewer = self._get_or_create_viewer()
+        viewer.show_image(path, images)
 
     def _collect_images_from_dir(self, path: Path, formats: set) -> list[Path]:
         """Collect images from directory, optionally including subdirectories."""
@@ -812,7 +863,7 @@ class FileListView(QWidget):
     # === Fuzzy Search ===
 
     def eventFilter(self, obj, event) -> bool:
-        """Filter key events from child views for fuzzy search."""
+        """Filter key events from child views for fuzzy search and custom commands."""
         # Handle focus events from child views
         if event.type() in (event.Type.FocusIn, event.Type.FocusOut):
             self._update_focus_style()
@@ -842,12 +893,35 @@ class FileListView(QWidget):
             )
 
             if text and text.isprintable() and not has_ctrl_or_meta:
+                # Check for custom command shortcut first (only when not searching)
+                if not self._search_text:
+                    if self._try_custom_command_shortcut(text.upper()):
+                        return True
+
                 self._search_text += text.lower()
                 self._do_fuzzy_search()
                 self._search_timer.start()
                 return True
 
         return super().eventFilter(obj, event)
+
+    def _try_custom_command_shortcut(self, shortcut: str) -> bool:
+        """Try to execute custom command by shortcut. Returns True if handled."""
+        from commander.utils.custom_commands import get_custom_commands_manager
+
+        selected_paths = self.get_selected_paths()
+        if not selected_paths:
+            return False
+
+        path = selected_paths[0]
+        mgr = get_custom_commands_manager()
+
+        for cmd in mgr.get_commands_for_path(path):
+            if cmd.shortcut and cmd.shortcut.upper() == shortcut:
+                self._run_custom_command(cmd, path)
+                return True
+
+        return False
 
     def _do_fuzzy_search(self) -> None:
         """Perform fuzzy search and select matching file."""

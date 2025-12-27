@@ -48,6 +48,11 @@ class ArchiveHandler(ABC):
         pass
 
     @abstractmethod
+    def extract_all(self, destination: Path) -> None:
+        """Extract entire archive to destination."""
+        pass
+
+    @abstractmethod
     def close(self) -> None:
         """Close the archive."""
         pass
@@ -131,6 +136,10 @@ class ZipHandler(ArchiveHandler):
         """Extract to destination."""
         self._zip.extract(internal_path, destination)
 
+    def extract_all(self, destination: Path) -> None:
+        """Extract entire archive to destination."""
+        self._zip.extractall(destination)
+
     def close(self) -> None:
         """Close the archive."""
         self._zip.close()
@@ -143,7 +152,7 @@ class RarHandler(ArchiveHandler):
         super().__init__(archive_path)
         if not HAS_RARFILE:
             raise ImportError("rarfile module not available")
-        self._rar = rarfile.RarFile(str(archive_path), "r")
+        self._rar = rarfile.RarFile(str(archive_path), "r")  # type: ignore[possibly-undefined]
         self._entries = self._build_entries()
 
     def _build_entries(self) -> dict[str, ArchiveEntry]:
@@ -214,6 +223,10 @@ class RarHandler(ArchiveHandler):
         """Extract to destination."""
         self._rar.extract(internal_path, str(destination))
 
+    def extract_all(self, destination: Path) -> None:
+        """Extract entire archive to destination."""
+        self._rar.extractall(str(destination))
+
     def close(self) -> None:
         """Close the archive."""
         self._rar.close()
@@ -251,3 +264,11 @@ class ArchiveManager:
     def supported_extensions(cls) -> list[str]:
         """Get list of supported extensions."""
         return list(cls.HANDLERS.keys())
+
+    @classmethod
+    def extract(cls, archive_path: Path, destination: Path) -> None:
+        """Extract entire archive to destination."""
+        handler = cls.get_handler(archive_path)
+        if handler is None:
+            raise ValueError(f"Unsupported archive format: {archive_path.suffix}")
+        handler.extract_all(destination)
