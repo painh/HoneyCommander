@@ -7,7 +7,6 @@ requires-python = ">=3.11"
 dependencies = [
     "pillow>=10.0.0",
     "psd-tools>=1.12.1",
-    "pyobjc-framework-cocoa>=10.0; sys_platform == 'darwin'",
     "pyside6>=6.8.0",
     "rarfile>=4.2",
     "send2trash>=1.8.3",
