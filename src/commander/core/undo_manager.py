@@ -267,12 +267,22 @@ class UndoManager(QObject):
 
     def _undo_delete(self, action: UndoableAction) -> bool:
         """Undo delete by restoring from trash."""
+        # Check if we have trash paths for restore
+        if not action.dest_paths:
+            self.action_performed.emit("Cannot undo delete: restore not supported on this platform")
+            return False
+
         handler = trash_handler()
         restored = 0
         for original, trash_path in zip(action.source_paths, action.dest_paths):
             if trash_path and handler.restore(original, trash_path):
                 restored += 1
-        return restored > 0
+
+        if restored == 0:
+            self.action_performed.emit("Cannot undo delete: files not found in trash")
+            return False
+
+        return True
 
     def _redo_delete(self, action: UndoableAction) -> bool:
         """Redo delete by moving files to trash again."""

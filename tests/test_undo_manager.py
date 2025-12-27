@@ -175,6 +175,10 @@ class TestUndoDelete:
         assert result.success
         assert not test_file.exists()
 
+        # Skip test if platform doesn't support trash restore (no trash_path)
+        if result.trash_path is None:
+            pytest.skip("Trash restore not supported on this platform (pyobjc not installed)")
+
         # Record delete with trash path
         undo_manager.record_delete([test_file], [result.trash_path])
 
@@ -195,6 +199,11 @@ class TestUndoDelete:
         # Trash the file
         handler = trash_handler()
         result = handler.trash(test_file)
+
+        # Skip test if platform doesn't support trash restore (no trash_path)
+        if result.trash_path is None:
+            pytest.skip("Trash restore not supported on this platform (pyobjc not installed)")
+
         undo_manager.record_delete([test_file], [result.trash_path])
 
         # Undo
