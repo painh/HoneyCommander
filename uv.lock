@@ -128,7 +128,7 @@ source = { editable = "." }
 dependencies = [
     { name = "pillow" },
     { name = "psd-tools" },
-    { name = "pyobjc-framework-cocoa" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
     { name = "pyside6" },
     { name = "rarfile" },
     { name = "send2trash" },
@@ -150,12 +150,6 @@ extra-formats = [
     { name = "pillow-heif" },
     { name = "rawpy" },
 ]
-macos = [
-    { name = "pyobjc-framework-cocoa" },
-]
-windows = [
-    { name = "winshell" },
-]
 
 [package.metadata]
 requires-dist = [
@@ -165,8 +159,7 @@ requires-dist = [
     { name = "pillow-heif", marker = "extra == 'extra-formats'", specifier = ">=0.16.0" },
     { name = "psd-tools", specifier = ">=1.12.1" },
     { name = "pyinstaller", marker = "extra == 'build'", specifier = ">=6.0.0" },
-    { name = "pyobjc-framework-cocoa", specifier = ">=12.1" },
-    { name = "pyobjc-framework-cocoa", marker = "extra == 'macos'", specifier = ">=10.0" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'", specifier = ">=10.0" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.0" },
     { name = "pyside6", specifier = ">=6.8.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },
@@ -175,9 +168,8 @@ requires-dist = [
     { name = "rawpy", marker = "extra == 'extra-formats'", specifier = ">=0.19.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "send2trash", specifier = ">=1.8.3" },
-    { name = "winshell", marker = "extra == 'windows'", specifier = ">=0.6" },
 ]
-provides-extras = ["dev", "build", "extra-formats", "macos", "windows"]
+provides-extras = ["dev", "build", "extra-formats"]
 
 [[package]]
 name = "iniconfig"
@@ -847,9 +839,3 @@ sdist = { url = "https://files.pythonhosted.org/packages/72/94/1a15dd82efb362ac8
 wheels = [
     { url = "https://files.pythonhosted.org/packages/18/67/36e9267722cc04a6b9f15c7f3441c2363321a3ea07da7ae0c0707beb2a9c/typing_extensions-4.15.0-py3-none-any.whl", hash = "sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548", size = 44614, upload-time = "2025-08-25T13:49:24.86Z" },
 ]
-
-[[package]]
-name = "winshell"
-version = "0.6"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/91/3f/d23d248029a49042d278af9c86b53bc90845e3739a0d7493e00cbac0e4cd/winshell-0.6.zip", hash = "sha256:16812fcd6a43391d6c0b707b4d67e809e52286a739683a91623baa0804ea0d41", size = 10070, upload-time = "2012-03-25T19:34:03.282Z" }
