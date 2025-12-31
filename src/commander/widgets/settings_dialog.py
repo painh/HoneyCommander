@@ -117,6 +117,20 @@ class SettingsDialog(QDialog):
         viewer_form.addRow(tr("settings_preload_count"), self._preload_count_spin)
 
         view_layout.addWidget(viewer_group)
+
+        # Archive group
+        archive_group = QGroupBox(tr("settings_archive"))
+        archive_form = QFormLayout(archive_group)
+
+        self._archive_threshold_spin = QSpinBox()
+        self._archive_threshold_spin.setRange(0, 10000)
+        self._archive_threshold_spin.setSingleStep(50)
+        self._archive_threshold_spin.setSuffix(" MB")
+        self._archive_threshold_spin.setToolTip(tr("settings_archive_size_threshold_tooltip"))
+        self._archive_threshold_spin.setSpecialValueText("Disabled")
+        archive_form.addRow(tr("settings_archive_size_threshold"), self._archive_threshold_spin)
+
+        view_layout.addWidget(archive_group)
         view_layout.addStretch()
         tabs.addTab(view_tab, tr("settings_view"))
 
@@ -215,6 +229,7 @@ class SettingsDialog(QDialog):
         self._thumb_size_spin.setValue(self._settings.load_thumbnail_size())
         self._anim_thumb_spin.setValue(self._settings.load_animation_thumb_size())
         self._preload_count_spin.setValue(self._settings.load_image_preload_count())
+        self._archive_threshold_spin.setValue(self._settings.load_archive_size_threshold())
 
         # Search
         self._fuzzy_timeout_spin.setValue(self._settings.load_fuzzy_search_timeout())
@@ -247,6 +262,7 @@ class SettingsDialog(QDialog):
         self._settings.save_thumbnail_size(self._thumb_size_spin.value())
         self._settings.save_animation_thumb_size(self._anim_thumb_spin.value())
         self._settings.save_image_preload_count(self._preload_count_spin.value())
+        self._settings.save_archive_size_threshold(self._archive_threshold_spin.value())
 
         # Search
         self._settings.save_fuzzy_search_timeout(self._fuzzy_timeout_spin.value())

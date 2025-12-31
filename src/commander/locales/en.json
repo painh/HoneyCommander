@@ -189,5 +189,14 @@
   "custom_commands_shortcut_help": "Single key to activate when menu is open",
 
   "image_viewer_subfolders_title": "Include Subfolders",
-  "image_viewer_subfolders_question": "This folder contains subfolders with images.\nDo you want to include images from all subfolders?"
+  "image_viewer_subfolders_question": "This folder contains subfolders with images.\nDo you want to include images from all subfolders?",
+
+  "settings_archive": "Archives",
+  "settings_archive_size_threshold": "Large archive threshold:",
+  "settings_archive_size_threshold_tooltip": "Show extract/browse dialog for archives larger than this size",
+
+  "archive_large_title": "Large Archive",
+  "archive_large_message": "This archive is {size}.\nWould you like to extract it or browse inside?",
+  "archive_extract": "Extract Here",
+  "archive_browse": "Browse Inside"
 }

@@ -566,8 +566,48 @@ class MainWindow(QMainWindow):
         self._viewer.show_image(path, images)
 
     def _open_archive(self, path: Path):
-        """Open archive browser."""
+        """Open archive browser, with optional extract prompt for large files."""
         from commander.views.archive_browser import ArchiveBrowser
+        from commander.core.archive_handler import ArchiveManager
+        from PySide6.QtWidgets import QMessageBox
+
+        # Check archive size threshold
+        threshold_mb = self._settings.load_archive_size_threshold()
+        if threshold_mb > 0:
+            try:
+                file_size_mb = path.stat().st_size / (1024 * 1024)
+                if file_size_mb >= threshold_mb:
+                    # Format size for display
+                    if file_size_mb >= 1024:
+                        size_str = f"{file_size_mb / 1024:.1f} GB"
+                    else:
+                        size_str = f"{file_size_mb:.1f} MB"
+
+                    # Show dialog
+                    msg = QMessageBox(self)
+                    msg.setWindowTitle(tr("archive_large_title"))
+                    msg.setText(tr("archive_large_message").replace("{size}", size_str))
+                    msg.setIcon(QMessageBox.Question)
+
+                    extract_btn = msg.addButton(tr("archive_extract"), QMessageBox.AcceptRole)
+                    browse_btn = msg.addButton(tr("archive_browse"), QMessageBox.RejectRole)
+                    msg.addButton(tr("cancel"), QMessageBox.RejectRole)
+
+                    msg.exec()
+
+                    if msg.clickedButton() == extract_btn:
+                        # Extract to same directory
+                        extract_dir = path.parent / path.stem
+                        extract_dir.mkdir(exist_ok=True)
+                        ArchiveManager.extract(path, extract_dir)
+                        self._navigate_to(extract_dir)
+                        return
+                    elif msg.clickedButton() == browse_btn:
+                        pass  # Continue to open archive browser
+                    else:
+                        return  # Cancel
+            except OSError:
+                pass  # If we can't get file size, just open normally
 
         self._archive_browser = ArchiveBrowser(path, self)
         self._archive_browser.show()

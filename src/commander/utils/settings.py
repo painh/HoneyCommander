@@ -248,3 +248,12 @@ class Settings:
     def load_image_preload_count(self) -> int:
         """Load image preload count. Default 3."""
         return self._settings.value("viewer/preload_count", 3, type=int)
+
+    # Archive size threshold for extract prompt (in MB)
+    def save_archive_size_threshold(self, size_mb: int):
+        """Save archive size threshold for extract prompt."""
+        self._settings.setValue("archive/size_threshold_mb", size_mb)
+
+    def load_archive_size_threshold(self) -> int:
+        """Load archive size threshold in MB. Default 100MB."""
+        return self._settings.value("archive/size_threshold_mb", 100, type=int)
