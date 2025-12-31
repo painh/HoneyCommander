@@ -123,6 +123,9 @@
   "settings_debug": "Debug",
   "settings_logging_enabled": "Enable logging:",
   "settings_log_path": "Log file:",
+  "settings_viewer": "Image Viewer",
+  "settings_preload_count": "Preload images:",
+  "settings_preload_tooltip": "Number of images to preload before/after current image (0 = disabled)",
 
   "shortcuts": "Keyboard Shortcuts",
   "about": "About",

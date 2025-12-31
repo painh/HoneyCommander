@@ -230,3 +230,21 @@ class Settings:
     def load_color_theme(self) -> str:
         """Load color theme setting. Default 'retro'."""
         return self._settings.value("view/color_theme", "retro", type=str)
+
+    # Image viewer fullscreen mode
+    def save_viewer_fullscreen(self, fullscreen: bool):
+        """Save image viewer fullscreen mode preference."""
+        self._settings.setValue("viewer/fullscreen", fullscreen)
+
+    def load_viewer_fullscreen(self) -> bool:
+        """Load image viewer fullscreen mode preference. Default True."""
+        return self._settings.value("viewer/fullscreen", True, type=bool)
+
+    # Image preload count (number of images to preload before/after current)
+    def save_image_preload_count(self, count: int):
+        """Save image preload count."""
+        self._settings.setValue("viewer/preload_count", count)
+
+    def load_image_preload_count(self) -> int:
+        """Load image preload count. Default 3."""
+        return self._settings.value("viewer/preload_count", 3, type=int)

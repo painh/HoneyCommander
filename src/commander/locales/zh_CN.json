@@ -117,6 +117,12 @@
   "settings_max_results": "最大搜索结果数:",
   "settings_cache_size": "缩略图缓存数:",
   "settings_undo_stack": "撤销堆栈大小:",
+  "settings_debug": "调试",
+  "settings_logging_enabled": "启用日志:",
+  "settings_log_path": "日志文件:",
+  "settings_viewer": "图像查看器",
+  "settings_preload_count": "预加载图像:",
+  "settings_preload_tooltip": "在当前图像前后预加载的图像数量 (0 = 禁用)",
 
   "shortcuts": "键盘快捷键",
   "about": "关于",

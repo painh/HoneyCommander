@@ -117,6 +117,12 @@
   "settings_max_results": "Máx. resultados de búsqueda:",
   "settings_cache_size": "Tamaño de caché de miniaturas:",
   "settings_undo_stack": "Tamaño de pila de deshacer:",
+  "settings_debug": "Depuración",
+  "settings_logging_enabled": "Habilitar registro:",
+  "settings_log_path": "Archivo de registro:",
+  "settings_viewer": "Visor de imágenes",
+  "settings_preload_count": "Precargar imágenes:",
+  "settings_preload_tooltip": "Número de imágenes a precargar antes/después de la imagen actual (0 = deshabilitado)",
 
   "shortcuts": "Atajos de teclado",
   "about": "Acerca de",

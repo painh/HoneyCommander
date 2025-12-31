@@ -117,6 +117,12 @@
   "settings_max_results": "最大検索結果数:",
   "settings_cache_size": "サムネイルキャッシュ数:",
   "settings_undo_stack": "元に戻すスタックサイズ:",
+  "settings_debug": "デバッグ",
+  "settings_logging_enabled": "ログ有効化:",
+  "settings_log_path": "ログファイル:",
+  "settings_viewer": "画像ビューア",
+  "settings_preload_count": "画像プリロード:",
+  "settings_preload_tooltip": "現在の画像の前後にプリロードする画像数 (0 = 無効)",
 
   "shortcuts": "キーボードショートカット",
   "about": "情報",

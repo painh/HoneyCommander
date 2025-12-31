@@ -106,6 +106,17 @@ class SettingsDialog(QDialog):
         view_form.addRow(tr("settings_anim_thumb_size"), self._anim_thumb_spin)
 
         view_layout.addWidget(view_group)
+
+        # Image Viewer group
+        viewer_group = QGroupBox(tr("settings_viewer"))
+        viewer_form = QFormLayout(viewer_group)
+
+        self._preload_count_spin = QSpinBox()
+        self._preload_count_spin.setRange(0, 10)
+        self._preload_count_spin.setToolTip(tr("settings_preload_tooltip"))
+        viewer_form.addRow(tr("settings_preload_count"), self._preload_count_spin)
+
+        view_layout.addWidget(viewer_group)
         view_layout.addStretch()
         tabs.addTab(view_tab, tr("settings_view"))
 
@@ -203,6 +214,7 @@ class SettingsDialog(QDialog):
 
         self._thumb_size_spin.setValue(self._settings.load_thumbnail_size())
         self._anim_thumb_spin.setValue(self._settings.load_animation_thumb_size())
+        self._preload_count_spin.setValue(self._settings.load_image_preload_count())
 
         # Search
         self._fuzzy_timeout_spin.setValue(self._settings.load_fuzzy_search_timeout())
@@ -234,6 +246,7 @@ class SettingsDialog(QDialog):
 
         self._settings.save_thumbnail_size(self._thumb_size_spin.value())
         self._settings.save_animation_thumb_size(self._anim_thumb_spin.value())
+        self._settings.save_image_preload_count(self._preload_count_spin.value())
 
         # Search
         self._settings.save_fuzzy_search_timeout(self._fuzzy_timeout_spin.value())

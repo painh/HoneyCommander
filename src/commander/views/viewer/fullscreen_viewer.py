@@ -7,8 +7,10 @@ import subprocess
 from pathlib import Path
 from io import BytesIO
 from dataclasses import dataclass
+from collections import OrderedDict
+from threading import Thread
 
-from PySide6.QtCore import Qt, Signal, QSize, QPoint
+from PySide6.QtCore import Qt, Signal, QSize, QPoint, QObject
 from PySide6.QtWidgets import (
     QWidget,
     QLabel,
@@ -71,6 +73,79 @@ def _load_pixmap_from_bytes(data: bytes) -> QPixmap:
         return pixmap
 
 
+class ImageCache(QObject):
+    """LRU cache for preloading images around the current index."""
+
+    image_loaded = Signal(object, QPixmap)  # path, pixmap
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._cache: OrderedDict[Path, QPixmap] = OrderedDict()
+        self._max_size: int = 10  # Will be updated from settings
+        self._loading: set[Path] = set()
+
+    def set_max_size(self, size: int) -> None:
+        """Set max cache size (preload_count * 2 + 1 for current)."""
+        self._max_size = max(1, size)
+        self._evict_if_needed()
+
+    def get(self, path: Path) -> QPixmap | None:
+        """Get cached pixmap, returns None if not cached."""
+        if path in self._cache:
+            # Move to end (most recently used)
+            self._cache.move_to_end(path)
+            return self._cache[path]
+        return None
+
+    def put(self, path: Path, pixmap: QPixmap) -> None:
+        """Put pixmap in cache."""
+        if path in self._cache:
+            self._cache.move_to_end(path)
+        else:
+            self._cache[path] = pixmap
+            self._evict_if_needed()
+
+    def _evict_if_needed(self) -> None:
+        """Evict oldest entries if cache exceeds max size."""
+        while len(self._cache) > self._max_size:
+            self._cache.popitem(last=False)
+
+    def is_cached(self, path: Path) -> bool:
+        """Check if path is in cache."""
+        return path in self._cache
+
+    def is_loading(self, path: Path) -> bool:
+        """Check if path is currently being loaded."""
+        return path in self._loading
+
+    def preload(self, path: Path) -> None:
+        """Preload image in background thread."""
+        if path in self._cache or path in self._loading:
+            return
+
+        self._loading.add(path)
+
+        def load_task():
+            try:
+                pixmap = load_pixmap(path)
+                if pixmap and not pixmap.isNull():
+                    self.image_loaded.emit(path, pixmap)
+            finally:
+                self._loading.discard(path)
+
+        thread = Thread(target=load_task, daemon=True)
+        thread.start()
+
+    def get_cached_paths(self) -> list[Path]:
+        """Get list of all cached paths (in order, oldest first)."""
+        return list(self._cache.keys())
+
+    def clear(self) -> None:
+        """Clear the cache."""
+        self._cache.clear()
+        self._loading.clear()
+
+
 class FullscreenImageViewer(QWidget):
     """Fullscreen image viewer with navigation."""
 
@@ -80,6 +155,7 @@ class FullscreenImageViewer(QWidget):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self._settings = Settings()
         self._image_list: list[Path] = []
@@ -102,6 +178,12 @@ class FullscreenImageViewer(QWidget):
         # Animation controller
         self._anim = AnimationController(self)
         self._anim.frame_changed.connect(self._on_anim_frame_changed)
+
+        # Image cache for preloading
+        self._preload_count = self._settings.load_image_preload_count()
+        self._image_cache = ImageCache(self)
+        self._image_cache.set_max_size(self._preload_count * 2 + 1)
+        self._image_cache.image_loaded.connect(self._on_image_preloaded)
 
         self._setup_ui()
 
@@ -134,13 +216,14 @@ class FullscreenImageViewer(QWidget):
         # Frame panel for animations
         self._setup_frame_panel(layout)
 
-        # Info overlay
-        self._info_overlay = QLabel(self)
+        # Info overlay - parent is scroll_area's viewport so it stays on top of image
+        self._info_overlay = QLabel(self._scroll_area.viewport())
         self._info_overlay.setStyleSheet(
             "color: white; background-color: rgba(0, 0, 0, 180); "
-            "padding: 10px; font-family: monospace;"
+            "padding: 10px; font-family: 'Menlo', 'Monaco', 'Courier New', monospace;"
         )
         self._info_overlay.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._info_overlay.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._info_overlay.hide()
 
         # Info label (bottom)
@@ -215,7 +298,7 @@ class FullscreenImageViewer(QWidget):
 
         self._reset_transform()
         self._load_current_image()
-        self.showFullScreen()
+        self._show_with_saved_mode()
 
     def show_archive(self, archive_path: Path) -> None:
         """Show images from an archive file."""
@@ -251,7 +334,7 @@ class FullscreenImageViewer(QWidget):
 
         self._reset_transform()
         self._load_current_image()
-        self.showFullScreen()
+        self._show_with_saved_mode()
 
     def _collect_archive_images(
         self, archive_path: Path, handler, internal_path: str
@@ -302,7 +385,7 @@ class FullscreenImageViewer(QWidget):
         self._frame_panel.hide()
 
         if self._archive_mode:
-            # Load from archive
+            # Load from archive (no caching for archives yet)
             if not self._archive_images:
                 return
             entry = self._archive_images[self._current_index]
@@ -316,9 +399,21 @@ class FullscreenImageViewer(QWidget):
             # Try loading as animation
             if self._anim.load(path):
                 self._load_animated(path)
+                self._preload_nearby_images()
                 return
 
-            self._original_pixmap = load_pixmap(path)
+            # Try to get from cache first
+            cached = self._image_cache.get(path)
+            if cached is not None:
+                self._original_pixmap = cached
+            else:
+                self._original_pixmap = load_pixmap(path)
+                # Cache current image
+                if self._original_pixmap and not self._original_pixmap.isNull():
+                    self._image_cache.put(path, self._original_pixmap)
+
+            # Preload nearby images
+            self._preload_nearby_images()
 
         if self._original_pixmap is None or self._original_pixmap.isNull():
             name = (
@@ -332,6 +427,31 @@ class FullscreenImageViewer(QWidget):
         self._zoom_level = self._get_fit_scale()
         self._update_display()
         self._update_info()
+
+        # Update info overlay if visible
+        if self._info_overlay_visible:
+            self._update_info_overlay()
+
+    def _preload_nearby_images(self) -> None:
+        """Preload images before and after current index."""
+        if self._archive_mode or not self._image_list or self._preload_count == 0:
+            return
+
+        total = len(self._image_list)
+        for offset in range(1, self._preload_count + 1):
+            # Preload next images
+            next_idx = self._current_index + offset
+            if next_idx < total:
+                self._image_cache.preload(self._image_list[next_idx])
+
+            # Preload previous images
+            prev_idx = self._current_index - offset
+            if prev_idx >= 0:
+                self._image_cache.preload(self._image_list[prev_idx])
+
+    def _on_image_preloaded(self, path: Path, pixmap: QPixmap) -> None:
+        """Handle preloaded image from background thread."""
+        self._image_cache.put(path, pixmap)
 
     def _load_archive_image(self, entry: ArchiveImageEntry) -> QPixmap:
         """Load image from archive."""
@@ -357,6 +477,10 @@ class FullscreenImageViewer(QWidget):
         self._setup_frame_thumbnails()
         self._update_frame_info()
         self._update_info()
+
+        # Update info overlay if visible
+        if self._info_overlay_visible:
+            self._update_info_overlay()
 
     def _setup_frame_thumbnails(self) -> None:
         """Create thumbnail placeholders and start generation."""
@@ -865,10 +989,13 @@ class FullscreenImageViewer(QWidget):
     # ══════════════════════════════════════════════════════════════════════════
 
     def _toggle_file_info(self) -> None:
+        """Toggle file info overlay visibility."""
         self._info_overlay_visible = not self._info_overlay_visible
+
         if self._info_overlay_visible:
             self._update_info_overlay()
             self._info_overlay.show()
+            self._info_overlay.raise_()
         else:
             self._info_overlay.hide()
 
@@ -927,6 +1054,17 @@ class FullscreenImageViewer(QWidget):
                         lines.append(f"{tag}: {value}")
         except Exception:
             pass
+
+        # Show cached images info
+        cached_paths = self._image_cache.get_cached_paths()
+        if cached_paths:
+            lines.extend(["", "=== 캐시된 이미지 ==="])
+            for cached_path in cached_paths:
+                if cached_path == path:
+                    # Current image - highlight with marker
+                    lines.append(f"▶ {cached_path.name} (현재)")
+                else:
+                    lines.append(f"  {cached_path.name}")
 
         self._info_overlay.setText("\n".join(lines))
         self._info_overlay.adjustSize()
@@ -1008,6 +1146,15 @@ class FullscreenImageViewer(QWidget):
     # ══════════════════════════════════════════════════════════════════════════
     # Event Handlers
     # ══════════════════════════════════════════════════════════════════════════
+
+    def event(self, event) -> bool:
+        """Override to handle Tab key before Qt uses it for focus navigation."""
+        from PySide6.QtCore import QEvent
+
+        if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Tab:
+            self.keyPressEvent(event)
+            return True
+        return super().event(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()
@@ -1131,6 +1278,26 @@ class FullscreenImageViewer(QWidget):
         elif event.button() == Qt.MouseButton.MiddleButton:
             self._toggle_fullscreen()
 
+    def _show_with_saved_mode(self) -> None:
+        """Show viewer with saved mode (fullscreen or windowed)."""
+        if self._settings.load_viewer_fullscreen():
+            self.showFullScreen()
+        else:
+            # Show in windowed mode
+            self.setWindowFlags(Qt.WindowType.Window)
+            # Center on screen
+            screen = QApplication.primaryScreen()
+            if screen:
+                screen_geo = screen.availableGeometry()
+                self.resize(int(screen_geo.width() * 0.8), int(screen_geo.height() * 0.8))
+                self.move(
+                    (screen_geo.width() - self.width()) // 2,
+                    (screen_geo.height() - self.height()) // 2,
+                )
+            self.show()
+            self.activateWindow()
+            self.setFocus()
+
     def _toggle_fullscreen(self) -> None:
         """Toggle between fullscreen and normal window mode."""
         if self.isFullScreen():
@@ -1138,8 +1305,10 @@ class FullscreenImageViewer(QWidget):
             # Restore window frame
             self.setWindowFlags(Qt.WindowType.Window)
             self.show()
+            self._settings.save_viewer_fullscreen(False)
         else:
             self.showFullScreen()
+            self._settings.save_viewer_fullscreen(True)
 
     def mouseMoveEvent(self, event) -> None:
         if self._pan_start and event.buttons() & Qt.MouseButton.LeftButton:

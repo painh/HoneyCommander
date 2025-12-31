@@ -123,6 +123,9 @@
   "settings_debug": "디버그",
   "settings_logging_enabled": "로그 활성화:",
   "settings_log_path": "로그 파일:",
+  "settings_viewer": "이미지 뷰어",
+  "settings_preload_count": "이미지 미리 로드:",
+  "settings_preload_tooltip": "현재 이미지 앞뒤로 미리 로드할 이미지 개수 (0 = 비활성화)",
 
   "shortcuts": "키보드 단축키",
   "about": "정보",

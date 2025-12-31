@@ -117,6 +117,12 @@
   "settings_max_results": "最大搜尋結果數:",
   "settings_cache_size": "縮圖快取數:",
   "settings_undo_stack": "復原堆疊大小:",
+  "settings_debug": "除錯",
+  "settings_logging_enabled": "啟用日誌:",
+  "settings_log_path": "日誌檔案:",
+  "settings_viewer": "圖片檢視器",
+  "settings_preload_count": "預載圖片:",
+  "settings_preload_tooltip": "在目前圖片前後預載的圖片數量 (0 = 停用)",
 
   "shortcuts": "鍵盤快速鍵",
   "about": "關於",
