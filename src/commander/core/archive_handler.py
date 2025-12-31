@@ -242,10 +242,44 @@ class ArchiveManager:
     if HAS_RARFILE:
         HANDLERS[".rar"] = RarHandler
 
+    # Split archive patterns (first volume only)
+    SPLIT_RAR_PATTERNS = [".part1.rar", ".part01.rar", ".part001.rar"]
+
     @classmethod
     def is_archive(cls, path: Path) -> bool:
         """Check if path is a supported archive."""
-        return path.suffix.lower() in cls.HANDLERS
+        suffix = path.suffix.lower()
+        if suffix in cls.HANDLERS:
+            return True
+
+        # Check for split RAR archives (only first volume)
+        if HAS_RARFILE:
+            name_lower = path.name.lower()
+            for pattern in cls.SPLIT_RAR_PATTERNS:
+                if name_lower.endswith(pattern):
+                    return True
+
+        return False
+
+    @classmethod
+    def is_split_archive_part(cls, path: Path) -> bool:
+        """Check if path is a non-first part of a split archive (should be hidden)."""
+        name_lower = path.name.lower()
+
+        # RAR split parts: .part2.rar, .part02.rar, .r00, .r01, etc.
+        if HAS_RARFILE:
+            import re
+
+            # .partN.rar where N > 1
+            match = re.search(r"\.part(\d+)\.rar$", name_lower)
+            if match and int(match.group(1)) > 1:
+                return True
+
+            # .r00, .r01, .r02, etc. (old style split)
+            if re.search(r"\.r\d{2,}$", name_lower):
+                return True
+
+        return False
 
     @classmethod
     def get_handler(cls, archive_path: Path) -> ArchiveHandler | None:
@@ -258,6 +292,17 @@ class ArchiveManager:
                 return handler_class(archive_path)
             except Exception:
                 return None
+
+        # Check for split RAR archives
+        if HAS_RARFILE:
+            name_lower = archive_path.name.lower()
+            for pattern in cls.SPLIT_RAR_PATTERNS:
+                if name_lower.endswith(pattern):
+                    try:
+                        return RarHandler(archive_path)
+                    except Exception:
+                        return None
+
         return None
 
     @classmethod
