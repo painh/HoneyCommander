@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build Commander using Nuitka for better performance."""
+"""Build HoneyCommander using Nuitka for better performance."""
 
 import subprocess
 import sys
@@ -19,7 +19,7 @@ def build():
         "--enable-plugin=pyside6",
         # Output settings
         f"--output-dir={project_root / 'dist'}",
-        "--output-filename=Commander",
+        "--output-filename=HoneyCommander",
         # Exclude unused Qt modules
         "--nofollow-import-to=PySide6.QtWebEngine*",
         "--nofollow-import-to=PySide6.Qt3D*",
@@ -45,19 +45,23 @@ def build():
 
     # Platform-specific options
     if sys.platform == "darwin":
-        args.extend([
-            "--macos-create-app-bundle",
-            "--macos-app-name=Commander",
-        ])
+        args.extend(
+            [
+                "--macos-create-app-bundle",
+                "--macos-app-name=HoneyCommander",
+            ]
+        )
     elif sys.platform == "win32":
-        args.extend([
-            "--windows-disable-console",
-        ])
+        args.extend(
+            [
+                "--windows-disable-console",
+            ]
+        )
 
     # Main script
     args.append(str(main_script))
 
-    print("Building Commander with Nuitka...")
+    print("Building HoneyCommander with Nuitka...")
     print("This may take several minutes...")
     print(f"Command: {' '.join(args)}")
 

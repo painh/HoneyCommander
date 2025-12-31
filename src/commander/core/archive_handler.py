@@ -1,10 +1,11 @@
-"""Archive file handler (ZIP, RAR)."""
+"""Archive file handler (ZIP, RAR, 7z)."""
 
 from abc import ABC, abstractmethod
 from pathlib import Path
 from zipfile import ZipFile
 from datetime import datetime
 from dataclasses import dataclass
+import re
 
 try:
     import rarfile
@@ -12,6 +13,13 @@ try:
     HAS_RARFILE = True
 except ImportError:
     HAS_RARFILE = False
+
+try:
+    import py7zr
+
+    HAS_PY7ZR = True
+except ImportError:
+    HAS_PY7ZR = False
 
 
 @dataclass
@@ -232,6 +240,107 @@ class RarHandler(ArchiveHandler):
         self._rar.close()
 
 
+class SevenZipHandler(ArchiveHandler):
+    """7z file handler."""
+
+    def __init__(self, archive_path: Path):
+        super().__init__(archive_path)
+        if not HAS_PY7ZR:
+            raise ImportError("py7zr module not available")
+        self._7z = py7zr.SevenZipFile(archive_path, "r")  # type: ignore[possibly-undefined]
+        self._entries = self._build_entries()
+        # Cache for file contents (7z requires reading all at once)
+        self._file_cache: dict[str, bytes] = {}
+
+    def _build_entries(self) -> dict[str, ArchiveEntry]:
+        """Build entry dictionary."""
+        entries = {}
+        dirs_added = set()
+
+        for info in self._7z.list():
+            path = info.filename.rstrip("/\\")
+            path = path.replace("\\", "/")
+            name = Path(path).name
+            is_dir = info.is_directory
+
+            mod_time = info.creationtime if hasattr(info, "creationtime") else None
+
+            entries[path] = ArchiveEntry(
+                name=name,
+                path=path,
+                is_dir=is_dir,
+                size=info.uncompressed if hasattr(info, "uncompressed") else 0,
+                compressed_size=info.compressed if hasattr(info, "compressed") else 0,
+                modified_time=mod_time,
+            )
+
+            # Add parent directories
+            parent = str(Path(path).parent)
+            while parent and parent != "." and parent not in dirs_added:
+                if parent not in entries:
+                    entries[parent] = ArchiveEntry(
+                        name=Path(parent).name,
+                        path=parent,
+                        is_dir=True,
+                        size=0,
+                        compressed_size=0,
+                        modified_time=None,
+                    )
+                dirs_added.add(parent)
+                parent = str(Path(parent).parent)
+
+        return entries
+
+    def list_entries(self, internal_path: str = "") -> list[ArchiveEntry]:
+        """List entries at given path."""
+        internal_path = internal_path.strip("/")
+        result = []
+
+        for path, entry in self._entries.items():
+            if internal_path:
+                if not path.startswith(internal_path + "/"):
+                    continue
+                relative = path[len(internal_path) + 1 :]
+            else:
+                relative = path
+
+            if "/" not in relative and relative:
+                result.append(entry)
+
+        return sorted(result, key=lambda e: (not e.is_dir, e.name.lower()))
+
+    def read_file(self, internal_path: str) -> bytes:
+        """Read file content."""
+        # py7zr requires extracting to get content
+        if internal_path in self._file_cache:
+            return self._file_cache[internal_path]
+
+        # Reset and read specific file
+        self._7z.reset()
+        result = self._7z.read([internal_path])
+        if result and internal_path in result:
+            bio = result[internal_path]
+            data = bio.read()
+            self._file_cache[internal_path] = data
+            return data
+        return b""
+
+    def extract(self, internal_path: str, destination: Path) -> None:
+        """Extract to destination."""
+        self._7z.reset()
+        self._7z.extract(destination, [internal_path])
+
+    def extract_all(self, destination: Path) -> None:
+        """Extract entire archive to destination."""
+        self._7z.reset()
+        self._7z.extractall(destination)
+
+    def close(self) -> None:
+        """Close the archive."""
+        self._7z.close()
+        self._file_cache.clear()
+
+
 class ArchiveManager:
     """Manager for handling different archive types."""
 
@@ -242,8 +351,12 @@ class ArchiveManager:
     if HAS_RARFILE:
         HANDLERS[".rar"] = RarHandler
 
+    if HAS_PY7ZR:
+        HANDLERS[".7z"] = SevenZipHandler
+
     # Split archive patterns (first volume only)
     SPLIT_RAR_PATTERNS = [".part1.rar", ".part01.rar", ".part001.rar"]
+    SPLIT_7Z_PATTERN = re.compile(r"\.7z\.001$", re.IGNORECASE)
 
     @classmethod
     def is_archive(cls, path: Path) -> bool:
@@ -252,12 +365,18 @@ class ArchiveManager:
         if suffix in cls.HANDLERS:
             return True
 
+        name_lower = path.name.lower()
+
         # Check for split RAR archives (only first volume)
         if HAS_RARFILE:
-            name_lower = path.name.lower()
             for pattern in cls.SPLIT_RAR_PATTERNS:
                 if name_lower.endswith(pattern):
                     return True
+
+        # Check for split 7z archives (only first volume .7z.001)
+        if HAS_PY7ZR:
+            if cls.SPLIT_7Z_PATTERN.search(name_lower):
+                return True
 
         return False
 
@@ -268,8 +387,6 @@ class ArchiveManager:
 
         # RAR split parts: .part2.rar, .part02.rar, .r00, .r01, etc.
         if HAS_RARFILE:
-            import re
-
             # .partN.rar where N > 1
             match = re.search(r"\.part(\d+)\.rar$", name_lower)
             if match and int(match.group(1)) > 1:
@@ -277,6 +394,12 @@ class ArchiveManager:
 
             # .r00, .r01, .r02, etc. (old style split)
             if re.search(r"\.r\d{2,}$", name_lower):
+                return True
+
+        # 7z split parts: .7z.002, .7z.003, etc.
+        if HAS_PY7ZR:
+            match = re.search(r"\.7z\.(\d{3})$", name_lower)
+            if match and int(match.group(1)) > 1:
                 return True
 
         return False
@@ -293,15 +416,24 @@ class ArchiveManager:
             except Exception:
                 return None
 
+        name_lower = archive_path.name.lower()
+
         # Check for split RAR archives
         if HAS_RARFILE:
-            name_lower = archive_path.name.lower()
             for pattern in cls.SPLIT_RAR_PATTERNS:
                 if name_lower.endswith(pattern):
                     try:
                         return RarHandler(archive_path)
                     except Exception:
                         return None
+
+        # Check for split 7z archives
+        if HAS_PY7ZR:
+            if cls.SPLIT_7Z_PATTERN.search(name_lower):
+                try:
+                    return SevenZipHandler(archive_path)
+                except Exception:
+                    return None
 
         return None
 

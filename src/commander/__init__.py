@@ -1,6 +1,6 @@
 """Commander - Cross-platform file explorer with image viewer."""
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __build_date__ = ""  # Set by CI during build, or generated at runtime if empty
 
 

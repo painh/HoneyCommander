@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build Commander using PyInstaller."""
+"""Build HoneyCommander using PyInstaller."""
 
 import subprocess
 import sys
@@ -15,9 +15,9 @@ def build():
         "-m",
         "PyInstaller",
         str(main_script),
-        "--name=Commander",
-        "--onefile",
+        "--name=HoneyCommander",
         "--windowed",
+        "--noconfirm",
         # Exclude unnecessary Qt modules to reduce size
         "--exclude-module=PySide6.QtWebEngine",
         "--exclude-module=PySide6.QtWebEngineCore",
@@ -76,11 +76,14 @@ def build():
     if sys.platform == "darwin":
         args.extend(
             [
-                "--osx-bundle-identifier=com.commander.app",
+                "--osx-bundle-identifier=com.honeycommander.app",
+                "--icon=assets/icon.icns",
+                "--add-data=assets:assets",
+                "--add-data=src/commander/locales:commander/locales",
             ]
         )
 
-    print("Building Commander...")
+    print("Building HoneyCommander...")
     print(f"Command: {' '.join(args)}")
 
     result = subprocess.run(args, cwd=project_root)
@@ -91,7 +94,7 @@ def build():
 
         # macOS: ad-hoc code signing to avoid "unidentified developer" warning
         if sys.platform == "darwin":
-            app_path = project_root / "dist" / "Commander.app"
+            app_path = project_root / "dist" / "HoneyCommander.app"
             if app_path.exists():
                 print("\nSigning app with ad-hoc signature...")
                 sign_result = subprocess.run(
