@@ -247,10 +247,26 @@ class SevenZipHandler(ArchiveHandler):
         super().__init__(archive_path)
         if not HAS_PY7ZR:
             raise ImportError("py7zr module not available")
-        self._7z = py7zr.SevenZipFile(archive_path, "r")  # type: ignore[possibly-undefined]
+
+        self._multivolume = None
+        self._7z = self._open_archive(archive_path)
         self._entries = self._build_entries()
         # Cache for file contents (7z requires reading all at once)
         self._file_cache: dict[str, bytes] = {}
+
+    def _open_archive(self, archive_path: Path):
+        """Open archive, handling split volumes."""
+        import multivolumefile
+
+        # Check if this is a split archive (.7z.001 or .7z.0001)
+        name_lower = archive_path.name.lower()
+        if re.search(r"\.7z\.\d{3,}$", name_lower):
+            # Remove the .NNN+ suffix to get base name for multivolumefile
+            base_path = re.sub(r"\.\d{3,}$", "", str(archive_path))
+            self._multivolume = multivolumefile.open(base_path, "rb")
+            return py7zr.SevenZipFile(self._multivolume, "r")  # type: ignore[possibly-undefined]
+        else:
+            return py7zr.SevenZipFile(archive_path, "r")  # type: ignore[possibly-undefined]
 
     def _build_entries(self) -> dict[str, ArchiveEntry]:
         """Build entry dictionary."""
@@ -311,18 +327,21 @@ class SevenZipHandler(ArchiveHandler):
 
     def read_file(self, internal_path: str) -> bytes:
         """Read file content."""
+        import tempfile
+
         # py7zr requires extracting to get content
         if internal_path in self._file_cache:
             return self._file_cache[internal_path]
 
-        # Reset and read specific file
+        # Extract to temp directory and read
         self._7z.reset()
-        result = self._7z.read([internal_path])
-        if result and internal_path in result:
-            bio = result[internal_path]
-            data = bio.read()
-            self._file_cache[internal_path] = data
-            return data
+        with tempfile.TemporaryDirectory() as tmp:
+            self._7z.extract(path=tmp, targets=[internal_path])
+            extracted_path = Path(tmp) / internal_path
+            if extracted_path.exists():
+                data = extracted_path.read_bytes()
+                self._file_cache[internal_path] = data
+                return data
         return b""
 
     def extract(self, internal_path: str, destination: Path) -> None:
@@ -338,6 +357,8 @@ class SevenZipHandler(ArchiveHandler):
     def close(self) -> None:
         """Close the archive."""
         self._7z.close()
+        if self._multivolume:
+            self._multivolume.close()
         self._file_cache.clear()
 
 
@@ -356,7 +377,7 @@ class ArchiveManager:
 
     # Split archive patterns (first volume only)
     SPLIT_RAR_PATTERNS = [".part1.rar", ".part01.rar", ".part001.rar"]
-    SPLIT_7Z_PATTERN = re.compile(r"\.7z\.001$", re.IGNORECASE)
+    SPLIT_7Z_PATTERN = re.compile(r"\.7z\.0*1$", re.IGNORECASE)  # .7z.001 or .7z.0001
 
     @classmethod
     def is_archive(cls, path: Path) -> bool:
@@ -396,9 +417,9 @@ class ArchiveManager:
             if re.search(r"\.r\d{2,}$", name_lower):
                 return True
 
-        # 7z split parts: .7z.002, .7z.003, etc.
+        # 7z split parts: .7z.002, .7z.003, .7z.0002, etc.
         if HAS_PY7ZR:
-            match = re.search(r"\.7z\.(\d{3})$", name_lower)
+            match = re.search(r"\.7z\.(\d{3,})$", name_lower)
             if match and int(match.group(1)) > 1:
                 return True
 
