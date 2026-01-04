@@ -29,11 +29,76 @@ from PySide6.QtGui import (
     QWheelEvent,
     QTransform,
     QCursor,
+    QPainter,
+    QPen,
+    QColor,
 )
 
 from commander.core.image_loader import load_pixmap, ALL_IMAGE_FORMATS
 from commander.utils.settings import Settings
 from commander.views.viewer.animation_controller import AnimationController
+
+
+class GridOverlay(QWidget):
+    """Transparent overlay widget that draws a grid over the image."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._grid_size = 16
+        self._visible = False
+
+    def set_grid_size(self, size: int) -> None:
+        """Set grid cell size in pixels."""
+        self._grid_size = max(4, size)
+        if self._visible:
+            self.update()
+
+    def grid_size(self) -> int:
+        """Get current grid size."""
+        return self._grid_size
+
+    def set_grid_visible(self, visible: bool) -> None:
+        """Show or hide the grid."""
+        self._visible = visible
+        self.setVisible(visible)
+        if visible:
+            self.update()
+
+    def is_grid_visible(self) -> bool:
+        """Check if grid is visible."""
+        return self._visible
+
+    def paintEvent(self, event) -> None:
+        """Draw the grid."""
+        if not self._visible:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+
+        # Semi-transparent cyan grid
+        pen = QPen(QColor(0, 255, 255, 100))
+        pen.setWidth(1)
+        painter.setPen(pen)
+
+        w, h = self.width(), self.height()
+        size = self._grid_size
+
+        # Draw vertical lines
+        x = 0
+        while x <= w:
+            painter.drawLine(x, 0, x, h)
+            x += size
+
+        # Draw horizontal lines
+        y = 0
+        while y <= h:
+            painter.drawLine(0, y, w, y)
+            y += size
+
+        painter.end()
 
 
 @dataclass
@@ -179,6 +244,10 @@ class FullscreenImageViewer(QWidget):
         self._anim = AnimationController(self)
         self._anim.frame_changed.connect(self._on_anim_frame_changed)
 
+        # Grid overlay settings
+        self._grid_visible = self._settings.load_viewer_grid_visible()
+        self._grid_size = self._settings.load_viewer_grid_size()
+
         # Image cache for preloading
         self._preload_count = self._settings.load_image_preload_count()
         self._image_cache = ImageCache(self)
@@ -215,6 +284,11 @@ class FullscreenImageViewer(QWidget):
 
         # Frame panel for animations
         self._setup_frame_panel(layout)
+
+        # Grid overlay - parent is image_label so it follows the image
+        self._grid_overlay = GridOverlay(self._image_label)
+        self._grid_overlay.set_grid_size(self._grid_size)
+        self._grid_overlay.set_grid_visible(self._grid_visible)
 
         # Info overlay - parent is scroll_area's viewport so it stays on top of image
         self._info_overlay = QLabel(self._scroll_area.viewport())
@@ -664,6 +738,9 @@ class FullscreenImageViewer(QWidget):
         self._image_label.setPixmap(scaled)
         self._image_label.resize(scaled.size())
 
+        # Update grid overlay size to match image
+        self._grid_overlay.setGeometry(0, 0, scaled.width(), scaled.height())
+
     def _update_info(self) -> None:
         """Update info label."""
         if self._archive_mode:
@@ -743,6 +820,28 @@ class FullscreenImageViewer(QWidget):
     def _set_filter(self, smooth: bool) -> None:
         self._smooth_filter = smooth
         self._update_display()
+
+    def _toggle_grid(self) -> None:
+        """Toggle grid overlay visibility."""
+        self._grid_visible = not self._grid_visible
+        self._grid_overlay.set_grid_visible(self._grid_visible)
+        self._settings.save_viewer_grid_visible(self._grid_visible)
+
+    def _change_grid_size(self) -> None:
+        """Show dialog to change grid size."""
+        size, ok = QInputDialog.getInt(
+            self,
+            "그리드 크기",
+            "그리드 크기 (픽셀):",
+            self._grid_size,
+            4,  # min
+            256,  # max
+            1,  # step
+        )
+        if ok:
+            self._grid_size = size
+            self._grid_overlay.set_grid_size(size)
+            self._settings.save_viewer_grid_size(size)
 
     # ══════════════════════════════════════════════════════════════════════════
     # Navigation
@@ -1121,6 +1220,17 @@ class FullscreenImageViewer(QWidget):
         view_menu.addAction("축소 (-)", self._zoom_out)
 
         menu.addAction("축소/확대 보기", self._show_zoom_dialog)
+
+        # Grid menu
+        grid_menu = menu.addMenu("그리드")
+        grid_toggle = grid_menu.addAction("그리드 표시 (G)")
+        grid_toggle.setCheckable(True)
+        grid_toggle.setChecked(self._grid_overlay.is_grid_visible())
+        grid_toggle.triggered.connect(self._toggle_grid)
+        grid_menu.addSeparator()
+        grid_menu.addAction(
+            f"그리드 크기 변경... (현재: {self._grid_size}px)", self._change_grid_size
+        )
         menu.addSeparator()
 
         folder_menu = menu.addMenu("폴더 이동")
@@ -1234,6 +1344,8 @@ class FullscreenImageViewer(QWidget):
             self._prev_folder()
         elif key == Qt.Key.Key_BracketRight:
             self._next_folder()
+        elif key == Qt.Key.Key_G:
+            self._toggle_grid()
         else:
             super().keyPressEvent(event)
 

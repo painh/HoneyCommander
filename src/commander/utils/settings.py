@@ -257,3 +257,21 @@ class Settings:
     def load_archive_size_threshold(self) -> int:
         """Load archive size threshold in MB. Default 100MB."""
         return self._settings.value("archive/size_threshold_mb", 100, type=int)
+
+    # Image viewer grid size
+    def save_viewer_grid_size(self, size: int):
+        """Save viewer grid size."""
+        self._settings.setValue("viewer/grid_size", size)
+
+    def load_viewer_grid_size(self) -> int:
+        """Load viewer grid size. Default 16."""
+        return self._settings.value("viewer/grid_size", 16, type=int)
+
+    # Image viewer grid visibility
+    def save_viewer_grid_visible(self, visible: bool):
+        """Save viewer grid visibility."""
+        self._settings.setValue("viewer/grid_visible", visible)
+
+    def load_viewer_grid_visible(self) -> bool:
+        """Load viewer grid visibility. Default False."""
+        return self._settings.value("viewer/grid_visible", False, type=bool)
