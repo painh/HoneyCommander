@@ -364,6 +364,19 @@ class FileListView(QWidget):
         """Get selected indexes of current view (for compatibility)."""
         return self._current_view().selectionModel().selectedIndexes()
 
+    def _select_paths(self, paths: list[Path]) -> None:
+        """Select specific paths in the current view."""
+        from PySide6.QtCore import QItemSelectionModel
+
+        view = self._current_view()
+        selection_model = view.selectionModel()
+        selection_model.clear()
+
+        for path in paths:
+            index = self._model.index(str(path))
+            if index.isValid():
+                selection_model.select(index, QItemSelectionModel.Select | QItemSelectionModel.Rows)
+
     # === Context Menu ===
 
     def _show_context_menu(self, pos: QPoint) -> None:
@@ -577,9 +590,11 @@ class FileListView(QWidget):
             except Exception as e:
                 errors.append(f"{path.name}: {e}")
 
-        # Refresh view
+        # Refresh view and restore selection to original archives
         if self._current_path:
             self.set_root_path(self._current_path)
+            # Clear selection and re-select only the original archive files
+            self._select_paths(paths)
 
         if errors:
             QMessageBox.warning(
