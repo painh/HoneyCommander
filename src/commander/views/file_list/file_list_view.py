@@ -40,6 +40,7 @@ from commander.views.file_list.drop_views import DropEnabledTreeView, DropEnable
 from commander.views.file_list.thumbnail_delegate import ThumbnailDelegate
 from commander.utils.settings import Settings
 from commander.utils.themes import get_file_color
+from commander.utils.i18n import tr
 
 if TYPE_CHECKING:
     from typing import Callable
@@ -53,11 +54,13 @@ class _MenuShortcutFilter(QObject):
         menu: QMenu,
         shortcut_actions: dict,
         run_command: Callable,
+        extract_callback: Callable | None = None,
     ):
         super().__init__(menu)
         self._menu = menu
         self._shortcut_actions = shortcut_actions
         self._run_command = run_command
+        self._extract_callback = extract_callback
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         if event.type() == QEvent.Type.KeyPress:
@@ -66,7 +69,11 @@ class _MenuShortcutFilter(QObject):
             if text in self._shortcut_actions:
                 cmd, path = self._shortcut_actions[text]
                 self._menu.close()
-                self._run_command(cmd, path)
+                if cmd is None and self._extract_callback:
+                    # Special case: extract archives (Z shortcut)
+                    self._extract_callback(path)
+                else:
+                    self._run_command(cmd, path)
                 return True
         return super().eventFilter(obj, event)
 
@@ -437,6 +444,15 @@ class FileListView(QWidget):
 
             menu.addSeparator()
 
+            # Extract All option for archives
+            from commander.core.archive_handler import ArchiveManager
+
+            archive_paths = [p for p in selected_paths if ArchiveManager.is_archive(p)]
+            if archive_paths:
+                extract_action = menu.addAction(f"{tr('extract_all')}(Z)")
+                extract_action.triggered.connect(lambda: self._extract_archives(archive_paths))
+                shortcut_actions["Z"] = (None, archive_paths)  # Special marker for extract
+
             # Compress option
             if len(selected_paths) >= 1:
                 compress_action = menu.addAction("Compress to ZIP...")
@@ -480,7 +496,12 @@ class FileListView(QWidget):
         # Install key event filter for custom command shortcuts
         if shortcut_actions:
             menu.installEventFilter(
-                _MenuShortcutFilter(menu, shortcut_actions, self._run_custom_command)
+                _MenuShortcutFilter(
+                    menu,
+                    shortcut_actions,
+                    self._run_custom_command,
+                    self._extract_archives,
+                )
             )
 
         view = self._current_view()
@@ -520,6 +541,51 @@ class FileListView(QWidget):
                 self,
                 "Extract Error",
                 f"Failed to extract archive:\n{e}",
+            )
+
+    def _extract_archives(self, paths: list[Path]) -> None:
+        """Extract multiple archives to their respective directories."""
+        from commander.core.archive_handler import ArchiveManager
+        import re
+
+        if not paths:
+            return
+
+        errors = []
+        for path in paths:
+            if not path.is_file():
+                continue
+
+            # Get proper stem for split archives
+            # e.g., "file.7z.001" -> "file", "file.part1.rar" -> "file"
+            stem = path.stem
+            name_lower = path.name.lower()
+
+            # Handle split 7z: file.7z.001 -> file
+            if re.search(r"\.7z\.\d{3,}$", name_lower):
+                stem = path.stem  # "file.7z"
+                if stem.lower().endswith(".7z"):
+                    stem = stem[:-3]  # "file"
+            # Handle split RAR: file.part1.rar -> file
+            elif re.search(r"\.part\d+\.rar$", name_lower):
+                stem = re.sub(r"\.part\d+$", "", path.stem, flags=re.IGNORECASE)
+
+            extract_dir = path.parent / stem
+
+            try:
+                ArchiveManager.extract(path, extract_dir)
+            except Exception as e:
+                errors.append(f"{path.name}: {e}")
+
+        # Refresh view
+        if self._current_path:
+            self.set_root_path(self._current_path)
+
+        if errors:
+            QMessageBox.warning(
+                self,
+                "Extract Error",
+                "Failed to extract some archives:\n" + "\n".join(errors[:5]),
             )
 
     def _is_viewer_valid(self) -> bool:

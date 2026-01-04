@@ -198,5 +198,8 @@
   "archive_large_title": "대용량 압축파일",
   "archive_large_message": "이 압축파일은 {size}입니다.\n압축을 풀거나 내부를 탐색하시겠습니까?",
   "archive_extract": "여기에 풀기",
-  "archive_browse": "내부 탐색"
+  "archive_browse": "내부 탐색",
+
+  "extract_all": "모두 압축 풀기",
+  "extracting": "압축 푸는 중..."
 }

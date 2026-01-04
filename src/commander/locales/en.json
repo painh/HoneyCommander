@@ -198,5 +198,8 @@
   "archive_large_title": "Large Archive",
   "archive_large_message": "This archive is {size}.\nWould you like to extract it or browse inside?",
   "archive_extract": "Extract Here",
-  "archive_browse": "Browse Inside"
+  "archive_browse": "Browse Inside",
+
+  "extract_all": "Extract All",
+  "extracting": "Extracting..."
 }
