@@ -44,14 +44,31 @@ class FileOperations:
         self._initialized = True
 
     def copy_to_clipboard(self, paths: list[Path]):
-        """Copy paths to internal clipboard."""
+        """Copy paths to internal and system clipboard."""
         self._clipboard = paths.copy()
         self._clipboard_mode = "copy"
+        self._set_system_clipboard(paths)
 
     def cut_to_clipboard(self, paths: list[Path]):
-        """Cut paths to internal clipboard."""
+        """Cut paths to internal and system clipboard."""
         self._clipboard = paths.copy()
         self._clipboard_mode = "cut"
+        self._set_system_clipboard(paths)
+
+    def _set_system_clipboard(self, paths: list[Path]):
+        """Set files to system clipboard for external app paste (e.g., Finder)."""
+        try:
+            from PySide6.QtWidgets import QApplication
+            from PySide6.QtCore import QMimeData, QUrl
+
+            mime_data = QMimeData()
+            urls = [QUrl.fromLocalFile(str(p)) for p in paths]
+            mime_data.setUrls(urls)
+
+            clipboard = QApplication.clipboard()
+            clipboard.setMimeData(mime_data)
+        except Exception:
+            pass  # Silently fail if clipboard access fails
 
     def has_clipboard(self) -> bool:
         """Check if clipboard has content (internal or system)."""
