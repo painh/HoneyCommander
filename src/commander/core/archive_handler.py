@@ -470,3 +470,53 @@ class ArchiveManager:
         if handler is None:
             raise ValueError(f"Unsupported archive format: {archive_path.suffix}")
         handler.extract_all(destination)
+
+    @classmethod
+    def smart_extract(cls, archive_path: Path, base_destination: Path) -> Path:
+        """Extract archive smartly based on contents.
+
+        If archive has a single top-level folder, extract directly to base_destination.
+        Otherwise, create a folder named after the archive and extract there.
+
+        Returns the actual extraction directory.
+        """
+        handler = cls.get_handler(archive_path)
+        if handler is None:
+            raise ValueError(f"Unsupported archive format: {archive_path.suffix}")
+
+        # Get top-level entries
+        entries = handler.list_entries()
+        top_level_dirs = [e for e in entries if e.is_dir and "/" not in e.name.rstrip("/")]
+        top_level_files = [e for e in entries if not e.is_dir and "/" not in e.name]
+
+        # Check if there's exactly one top-level folder and no top-level files
+        if len(top_level_dirs) == 1 and len(top_level_files) == 0:
+            # Single top-level folder - extract directly
+            extract_dir = base_destination
+        else:
+            # Multiple items or files at top level - create wrapper folder
+            # Get proper stem for split archives
+            stem = cls._get_archive_stem(archive_path)
+            extract_dir = base_destination / stem
+
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        handler.extract_all(extract_dir)
+        handler.close()
+        return extract_dir
+
+    @classmethod
+    def _get_archive_stem(cls, archive_path: Path) -> str:
+        """Get the stem name for an archive, handling split archives."""
+        stem = archive_path.stem
+        name_lower = archive_path.name.lower()
+
+        # Handle split 7z: file.7z.001 -> file
+        if re.search(r"\.7z\.\d{3,}$", name_lower):
+            stem = archive_path.stem  # "file.7z"
+            if stem.lower().endswith(".7z"):
+                stem = stem[:-3]  # "file"
+        # Handle split RAR: file.part1.rar -> file
+        elif re.search(r"\.part\d+\.rar$", name_lower):
+            stem = re.sub(r"\.part\d+$", "", archive_path.stem, flags=re.IGNORECASE)
+
+        return stem

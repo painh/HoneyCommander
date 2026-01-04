@@ -559,7 +559,6 @@ class FileListView(QWidget):
     def _extract_archives(self, paths: list[Path]) -> None:
         """Extract multiple archives to their respective directories."""
         from commander.core.archive_handler import ArchiveManager
-        import re
 
         if not paths:
             return
@@ -569,24 +568,10 @@ class FileListView(QWidget):
             if not path.is_file():
                 continue
 
-            # Get proper stem for split archives
-            # e.g., "file.7z.001" -> "file", "file.part1.rar" -> "file"
-            stem = path.stem
-            name_lower = path.name.lower()
-
-            # Handle split 7z: file.7z.001 -> file
-            if re.search(r"\.7z\.\d{3,}$", name_lower):
-                stem = path.stem  # "file.7z"
-                if stem.lower().endswith(".7z"):
-                    stem = stem[:-3]  # "file"
-            # Handle split RAR: file.part1.rar -> file
-            elif re.search(r"\.part\d+\.rar$", name_lower):
-                stem = re.sub(r"\.part\d+$", "", path.stem, flags=re.IGNORECASE)
-
-            extract_dir = path.parent / stem
-
             try:
-                ArchiveManager.extract(path, extract_dir)
+                # Smart extract: if single top-level folder, extract directly
+                # Otherwise, create folder named after archive
+                ArchiveManager.smart_extract(path, path.parent)
             except Exception as e:
                 errors.append(f"{path.name}: {e}")
 

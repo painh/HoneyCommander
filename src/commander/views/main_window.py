@@ -596,10 +596,8 @@ class MainWindow(QMainWindow):
                     msg.exec()
 
                     if msg.clickedButton() == extract_btn:
-                        # Extract to same directory
-                        extract_dir = path.parent / path.stem
-                        extract_dir.mkdir(exist_ok=True)
-                        ArchiveManager.extract(path, extract_dir)
+                        # Smart extract to same directory
+                        extract_dir = ArchiveManager.smart_extract(path, path.parent)
                         self._navigate_to(extract_dir)
                         return
                     elif msg.clickedButton() == browse_btn:
