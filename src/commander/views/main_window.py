@@ -79,6 +79,9 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(0)
 
         # Tab bar container (tab bar + new tab button)
+        from PySide6.QtWidgets import QLabel, QSpacerItem, QSizePolicy
+        import sys
+
         tab_bar_container = QWidget()
         tab_bar_container.setStyleSheet("""
             QWidget {
@@ -88,55 +91,46 @@ class MainWindow(QMainWindow):
         """)
         tab_bar_layout = QHBoxLayout(tab_bar_container)
         tab_bar_layout.setContentsMargins(4, 4, 4, 0)
-        tab_bar_layout.setSpacing(4)
+        tab_bar_layout.setSpacing(0)
 
-        # Tab bar
+        # Tab bar (no stretch - stays compact)
         _logger.debug("_setup_ui: Creating tab bar...")
         self._tab_bar = CommanderTabBar()
-        tab_bar_layout.addWidget(self._tab_bar, stretch=1)
+        tab_bar_layout.addWidget(self._tab_bar)
 
-        # New tab button with shortcut hint
-        from PySide6.QtWidgets import QLabel
-        import sys
-
+        # New tab button with shortcut hint (right next to tabs)
         # Determine shortcut key based on platform
         shortcut_key = "Cmd+T" if sys.platform == "darwin" else "Ctrl+T"
 
-        self._new_tab_btn = QPushButton("+")
-        self._new_tab_btn.setFixedSize(28, 28)
+        self._new_tab_btn = QPushButton(f"+  {shortcut_key}")
         self._new_tab_btn.setToolTip(f"New Tab ({shortcut_key})")
         self._new_tab_btn.setStyleSheet("""
             QPushButton {
-                background-color: transparent;
+                background: #3c3c3c;
                 color: #888888;
-                border: none;
-                border-radius: 4px;
-                font-size: 20px;
-                font-weight: bold;
+                border: 1px solid #555555;
+                border-bottom: none;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                padding: 8px 12px;
+                margin-left: 2px;
+                font-size: 12px;
             }
             QPushButton:hover {
-                background-color: #3c3c3c;
+                background: #454545;
                 color: #ffffff;
             }
             QPushButton:pressed {
-                background-color: #2d2d2d;
+                background: #2d2d2d;
             }
         """)
         self._new_tab_btn.clicked.connect(self._create_new_tab)
         tab_bar_layout.addWidget(self._new_tab_btn)
 
-        # Shortcut hint label
-        self._shortcut_label = QLabel(shortcut_key)
-        self._shortcut_label.setStyleSheet("""
-            QLabel {
-                color: #555555;
-                font-size: 11px;
-                padding: 0 4px;
-                background: transparent;
-                border: none;
-            }
-        """)
-        tab_bar_layout.addWidget(self._shortcut_label)
+        # Spacer to push everything to the left
+        tab_bar_layout.addSpacerItem(
+            QSpacerItem(0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        )
 
         main_layout.addWidget(tab_bar_container)
 
