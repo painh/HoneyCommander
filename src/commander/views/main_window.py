@@ -95,21 +95,27 @@ class MainWindow(QMainWindow):
         self._tab_bar = CommanderTabBar()
         tab_bar_layout.addWidget(self._tab_bar, stretch=1)
 
-        # New tab button
+        # New tab button with shortcut hint
+        from PySide6.QtWidgets import QLabel
+        import sys
+
+        # Determine shortcut key based on platform
+        shortcut_key = "Cmd+T" if sys.platform == "darwin" else "Ctrl+T"
+
         self._new_tab_btn = QPushButton("+")
-        self._new_tab_btn.setFixedSize(32, 32)
-        self._new_tab_btn.setToolTip("New Tab (Ctrl+T)")
+        self._new_tab_btn.setFixedSize(28, 28)
+        self._new_tab_btn.setToolTip(f"New Tab ({shortcut_key})")
         self._new_tab_btn.setStyleSheet("""
             QPushButton {
-                background-color: #3c3c3c;
-                color: #cccccc;
-                border: 1px solid #555555;
-                border-radius: 6px;
-                font-size: 18px;
+                background-color: transparent;
+                color: #888888;
+                border: none;
+                border-radius: 4px;
+                font-size: 20px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #454545;
+                background-color: #3c3c3c;
                 color: #ffffff;
             }
             QPushButton:pressed {
@@ -118,6 +124,19 @@ class MainWindow(QMainWindow):
         """)
         self._new_tab_btn.clicked.connect(self._create_new_tab)
         tab_bar_layout.addWidget(self._new_tab_btn)
+
+        # Shortcut hint label
+        self._shortcut_label = QLabel(shortcut_key)
+        self._shortcut_label.setStyleSheet("""
+            QLabel {
+                color: #555555;
+                font-size: 11px;
+                padding: 0 4px;
+                background: transparent;
+                border: none;
+            }
+        """)
+        tab_bar_layout.addWidget(self._shortcut_label)
 
         main_layout.addWidget(tab_bar_container)
 
