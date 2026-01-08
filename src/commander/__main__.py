@@ -57,6 +57,7 @@ class WindowManager:
 
     def __init__(self):
         self._windows: list[MainWindow] = []
+        self._closed_tabs: list[dict] = []  # Cross-window closed tabs
         _logger.debug("WindowManager initialized")
 
     @classmethod
@@ -70,11 +71,8 @@ class WindowManager:
         _logger.info(f"Creating new window at path: {path}")
         try:
             _logger.debug("About to create MainWindow instance...")
-            window = MainWindow()
+            window = MainWindow(initial_path=path)
             _logger.debug("MainWindow instance created")
-            if path and path.exists() and path.is_dir():
-                window._navigate_to(path)
-                _logger.debug(f"Navigated to path: {path}")
             _logger.debug("Connecting destroyed signal...")
             window.destroyed.connect(lambda: self._on_window_destroyed(window))
             _logger.debug("Adding window to list...")
@@ -83,6 +81,19 @@ class WindowManager:
             return window
         except Exception as e:
             _logger.critical(f"Failed to create window: {e}", exc_info=True)
+            raise
+
+    def create_window_from_tab(self, tab_data: dict) -> MainWindow:
+        """Create a new window from detached tab data."""
+        _logger.info("Creating new window from tab data")
+        try:
+            window = MainWindow(tab_data=tab_data)
+            window.destroyed.connect(lambda: self._on_window_destroyed(window))
+            self._windows.append(window)
+            _logger.info(f"Window from tab created. Total windows: {len(self._windows)}")
+            return window
+        except Exception as e:
+            _logger.critical(f"Failed to create window from tab: {e}", exc_info=True)
             raise
 
     def _on_window_destroyed(self, window: MainWindow):
@@ -98,6 +109,70 @@ class WindowManager:
         """Close all windows."""
         for window in self._windows.copy():
             window.close()
+
+    # === Session Management ===
+
+    def save_session(self):
+        """Save all windows and tabs to session file."""
+        from commander.utils.settings import Settings
+
+        settings = Settings()
+        session_data = []
+
+        for window in self._windows:
+            try:
+                window_data = window.serialize_window()
+                # Only save windows that have tabs
+                tabs = window_data.get("tabs", [])
+                if tabs:
+                    session_data.append(window_data)
+                else:
+                    _logger.debug("Skipping window with no tabs during save")
+            except Exception as e:
+                _logger.error(f"Failed to serialize window: {e}")
+
+        settings.save_session(session_data)
+        _logger.info(f"Session saved: {len(session_data)} windows")
+
+    def restore_session(self) -> bool:
+        """Restore windows and tabs from session file.
+
+        Returns:
+            True if session was restored, False otherwise.
+        """
+        from commander.utils.settings import Settings
+
+        settings = Settings()
+
+        if not settings.load_restore_session_enabled():
+            _logger.debug("Session restore disabled")
+            return False
+
+        session_data = settings.load_session()
+        if not session_data:
+            _logger.debug("No session data to restore")
+            return False
+
+        _logger.info(f"Restoring session: {len(session_data)} windows")
+
+        for window_data in session_data:
+            try:
+                # Skip windows with no tabs
+                tabs = window_data.get("tabs", [])
+                if not tabs:
+                    _logger.debug("Skipping window with empty tabs")
+                    continue
+
+                # Create window without initial tab
+                window = MainWindow()
+                window.restore_from_session(window_data)
+                window.destroyed.connect(lambda w=window: self._on_window_destroyed(w))
+                self._windows.append(window)
+                window.show()
+            except Exception as e:
+                _logger.error(f"Failed to restore window: {e}")
+
+        return len(self._windows) > 0
 
 
 def get_window_manager() -> WindowManager:
@@ -245,13 +320,22 @@ def main():
         _logger.info("Processed pending files, starting event loop")
         sys.exit(app.exec())
 
-    # Default: open main window
-    _logger.info("Opening default main window...")
-    window = wm.create_window()
-    _logger.info("create_window returned, about to call show()...")
-    window.show()
-    _logger.info("show() completed, window should be visible")
-    app._started = True
+    # Try to restore session first
+    _logger.info("Attempting to restore session...")
+    if wm.restore_session():
+        _logger.info("Session restored successfully")
+        app._started = True
+    else:
+        # Default: open main window
+        _logger.info("Opening default main window...")
+        window = wm.create_window()
+        _logger.info("create_window returned, about to call show()...")
+        window.show()
+        _logger.info("show() completed, window should be visible")
+        app._started = True
+
+    # Save session on quit
+    app.aboutToQuit.connect(wm.save_session)
 
     _logger.info("Starting Qt event loop (app.exec())...")
     result = app.exec()

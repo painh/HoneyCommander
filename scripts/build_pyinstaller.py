@@ -28,8 +28,7 @@ def build():
         "--exclude-module=PySide6.Qt3DLogic",
         "--exclude-module=PySide6.Qt3DAnimation",
         "--exclude-module=PySide6.Qt3DExtras",
-        "--exclude-module=PySide6.QtMultimedia",
-        "--exclude-module=PySide6.QtMultimediaWidgets",
+        # QtMultimedia is used by preview_panel.py - do not exclude
         "--exclude-module=PySide6.QtSql",
         "--exclude-module=PySide6.QtTest",
         "--exclude-module=PySide6.QtBluetooth",

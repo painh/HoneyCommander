@@ -1,27 +1,25 @@
-"""Main window with 3-panel layout."""
+"""Main window with tab support and 3-panel layout."""
 
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QFileSystemWatcher
 from PySide6.QtWidgets import (
     QMainWindow,
-    QSplitter,
     QWidget,
     QVBoxLayout,
+    QHBoxLayout,
     QToolBar,
     QPushButton,
     QStatusBar,
     QInputDialog,
     QDialog,
+    QStackedWidget,
 )
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
 
-from commander.views.folder_tree import FolderTreeView
-from commander.views.file_list import FileListView
-from commander.views.preview_panel import PreviewPanel
-from commander.widgets.address_bar import AddressBar
-from commander.widgets.favorites_panel import FavoritesPanel
+from commander.widgets.tab_bar import CommanderTabBar
+from commander.widgets.tab_content import TabContentWidget
+from commander.core.tab_manager import TabManager
 from commander.core.file_operations import FileOperations
 from commander.core.undo_manager import get_undo_manager
 from commander.utils.settings import Settings
@@ -33,20 +31,21 @@ _logger = get_logger()
 
 
 class MainWindow(QMainWindow):
-    """Main window with explorer-style 3-panel layout."""
+    """Main window with tab support and explorer-style 3-panel layout."""
 
-    def __init__(self):
+    def __init__(self, initial_path: Path = None, tab_data: dict = None):
+        """Initialize main window.
+
+        Args:
+            initial_path: Initial path for the first tab.
+            tab_data: Optional serialized tab data to restore.
+        """
         _logger.info("MainWindow.__init__ started")
         super().__init__()
         self._settings = Settings()
-        self._current_path: Path = Path.home()
-        self._history: list[Path] = [self._current_path]
-        self._history_index: int = 0
         self._file_ops = FileOperations()
-
-        # File system watcher for external changes
-        self._watcher = QFileSystemWatcher()
-        self._watcher.directoryChanged.connect(self._on_directory_changed)
+        self._initial_path = initial_path
+        self._initial_tab_data = tab_data
 
         _logger.debug("Setting up toolbar...")
         self._setup_toolbar()
@@ -56,8 +55,6 @@ class MainWindow(QMainWindow):
         self._setup_menu()
         _logger.debug("Setting up shortcuts...")
         self._setup_shortcuts()
-        _logger.debug("Connecting signals...")
-        self._connect_signals()
         _logger.debug("Loading settings...")
         self._load_settings()
         _logger.debug("Checking for updates...")
@@ -69,10 +66,10 @@ class MainWindow(QMainWindow):
 
         # Keep reference to update thread
         self._update_thread = None
-        _logger.info("MainWindow.__init__ completed, about to return")
+        _logger.info("MainWindow.__init__ completed")
 
     def _setup_ui(self):
-        """Setup the main UI layout."""
+        """Setup the main UI layout with tabs."""
         _logger.debug("_setup_ui: Creating central widget...")
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -81,42 +78,58 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Address bar
-        _logger.debug("_setup_ui: Creating AddressBar...")
-        self._address_bar = AddressBar()
-        main_layout.addWidget(self._address_bar)
+        # Tab bar container (tab bar + new tab button)
+        tab_bar_container = QWidget()
+        tab_bar_container.setStyleSheet("""
+            QWidget {
+                background-color: #252526;
+                border-bottom: 1px solid #3c3c3c;
+            }
+        """)
+        tab_bar_layout = QHBoxLayout(tab_bar_container)
+        tab_bar_layout.setContentsMargins(4, 4, 4, 0)
+        tab_bar_layout.setSpacing(4)
 
-        # 3-panel splitter
-        _logger.debug("_setup_ui: Creating splitter...")
-        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        # Tab bar
+        _logger.debug("_setup_ui: Creating tab bar...")
+        self._tab_bar = CommanderTabBar()
+        tab_bar_layout.addWidget(self._tab_bar, stretch=1)
 
-        # Left panel: Favorites + Folder tree
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(0)
+        # New tab button
+        self._new_tab_btn = QPushButton("+")
+        self._new_tab_btn.setFixedSize(32, 32)
+        self._new_tab_btn.setToolTip("New Tab (Ctrl+T)")
+        self._new_tab_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3c3c3c;
+                color: #cccccc;
+                border: 1px solid #555555;
+                border-radius: 6px;
+                font-size: 18px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #454545;
+                color: #ffffff;
+            }
+            QPushButton:pressed {
+                background-color: #2d2d2d;
+            }
+        """)
+        self._new_tab_btn.clicked.connect(self._create_new_tab)
+        tab_bar_layout.addWidget(self._new_tab_btn)
 
-        _logger.debug("_setup_ui: Creating FavoritesPanel...")
-        self._favorites_panel = FavoritesPanel()
-        _logger.debug("_setup_ui: Creating FolderTreeView...")
-        self._folder_tree = FolderTreeView()
+        main_layout.addWidget(tab_bar_container)
 
-        left_layout.addWidget(self._favorites_panel)
-        left_layout.addWidget(self._folder_tree, stretch=1)
+        # Tab content stack
+        _logger.debug("_setup_ui: Creating tab stack...")
+        self._tab_stack = QStackedWidget()
+        main_layout.addWidget(self._tab_stack, stretch=1)
 
-        _logger.debug("_setup_ui: Creating FileListView...")
-        self._file_list = FileListView()
-        _logger.debug("_setup_ui: Creating PreviewPanel...")
-        self._preview_panel = PreviewPanel()
-
-        self._splitter.addWidget(left_panel)
-        self._splitter.addWidget(self._file_list)
-        self._splitter.addWidget(self._preview_panel)
-
-        # Default sizes (1:3:1 ratio)
-        self._splitter.setSizes([200, 600, 200])
-
-        main_layout.addWidget(self._splitter, stretch=1)
+        # Tab manager
+        _logger.debug("_setup_ui: Creating tab manager...")
+        self._tab_manager = TabManager(self._tab_stack, self)
+        self._connect_tab_signals()
 
         # Status bar
         _logger.debug("_setup_ui: Creating status bar...")
@@ -124,10 +137,458 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self._status_bar)
         self._status_bar.showMessage("Ready")
 
-        # Navigate to home
-        _logger.debug(f"_setup_ui: Navigating to {self._current_path}...")
-        self._navigate_to(self._current_path)
+        # Create initial tab
+        _logger.debug("_setup_ui: Creating initial tab...")
+        if self._initial_tab_data:
+            self._tab_manager.merge_tab(self._initial_tab_data)
+        else:
+            path = self._initial_path or Path.home()
+            self._tab_manager.create_tab(path)
+
         _logger.debug("_setup_ui completed")
+
+    def _connect_tab_signals(self):
+        """Connect tab-related signals."""
+        # Tab bar signals
+        self._tab_bar.currentChanged.connect(self._on_tab_bar_changed)
+        self._tab_bar.close_tab_requested.connect(self._close_tab)
+        self._tab_bar.new_tab_requested.connect(self._create_new_tab)
+        self._tab_bar.tab_detach_requested.connect(self._detach_tab)
+        self._tab_bar.tab_drop_received.connect(self._on_tab_drop_received)
+        self._tab_bar.duplicate_tab_requested.connect(self._duplicate_tab)
+        self._tab_bar.close_other_tabs_requested.connect(self._close_other_tabs)
+        self._tab_bar.close_tabs_to_right_requested.connect(self._close_tabs_to_right)
+
+        # Tab manager signals
+        self._tab_manager.tab_added.connect(self._on_tab_added)
+        self._tab_manager.tab_removed.connect(self._on_tab_removed)
+        self._tab_manager.current_tab_changed.connect(self._on_current_tab_changed)
+        self._tab_manager.tab_title_changed.connect(self._on_tab_title_changed)
+        self._tab_manager.all_tabs_closed.connect(self.close)
+
+        # Undo manager signals
+        undo_mgr = get_undo_manager()
+        undo_mgr.undo_available.connect(self._on_undo_available)
+        undo_mgr.redo_available.connect(self._on_redo_available)
+        undo_mgr.action_performed.connect(self._on_undo_action_performed)
+
+    def _connect_tab_content_signals(self, tab: TabContentWidget):
+        """Connect signals for a specific tab content."""
+        tab.item_activated.connect(self._on_item_activated)
+        tab.files_dropped.connect(self._on_files_dropped)
+        tab.request_new_window.connect(self._open_new_window_at)
+
+    # === Tab Bar Event Handlers ===
+
+    def _on_tab_bar_changed(self, index: int):
+        """Handle tab bar selection change."""
+        if index >= 0:
+            self._tab_manager.switch_to_tab(index)
+
+    def _on_tab_added(self, index: int):
+        """Handle new tab added."""
+        from PySide6.QtWidgets import QFileIconProvider
+
+        tab = self._tab_manager.get_tab(index)
+        if tab:
+            self._connect_tab_content_signals(tab)
+
+            # Add to tab bar with folder icon
+            icon_provider = QFileIconProvider()
+            folder_icon = icon_provider.icon(QFileIconProvider.IconType.Folder)
+
+            self._tab_bar.insertTab(index, folder_icon, tab.get_tab_title())
+            self._tab_bar.setTabToolTip(index, tab.get_tab_tooltip())
+
+    def _on_tab_removed(self, index: int):
+        """Handle tab removed."""
+        self._tab_bar.removeTab(index)
+
+    def _on_current_tab_changed(self, index: int, tab: TabContentWidget):
+        """Handle current tab change."""
+        # Sync tab bar
+        if self._tab_bar.currentIndex() != index:
+            self._tab_bar.setCurrentIndex(index)
+
+        # Update nav buttons
+        self._update_nav_buttons()
+        self._update_status()
+        self._update_window_title()
+
+    def _on_tab_title_changed(self, index: int, title: str):
+        """Handle tab title change."""
+        tab = self._tab_manager.get_tab(index)
+        if tab:
+            self._tab_bar.update_tab(index, title, tab.get_tab_tooltip())
+
+        # Update window title if current tab
+        if index == self._tab_manager.current_index:
+            self._update_window_title()
+
+    def _on_tab_drop_received(self, tab_info: dict, insert_index: int):
+        """Handle tab dropped from another window."""
+        from commander.__main__ import get_window_manager
+
+        source_window_id = tab_info.get("source_window_id")
+        source_tab_index = tab_info.get("tab_index")
+
+        # Find source window
+        for window in get_window_manager().get_windows():
+            if id(window) == source_window_id:
+                # Get tab data from source
+                tab_data = window._tab_manager.detach_tab(source_tab_index)
+                if tab_data:
+                    self._tab_manager.merge_tab(tab_data, insert_index)
+                break
+
+    # === Tab Operations ===
+
+    def _create_new_tab(self):
+        """Create new tab at current path."""
+        current_tab = self._tab_manager.get_current_tab()
+        path = current_tab.current_path if current_tab else Path.home()
+        self._tab_manager.create_tab(path)
+
+    def _close_tab(self, index: int = None):
+        """Close tab at index (or current tab)."""
+        if index is None:
+            index = self._tab_manager.current_index
+        self._tab_manager.close_tab(index)
+
+    def _close_other_tabs(self, keep_index: int):
+        """Close all tabs except one."""
+        self._tab_manager.close_other_tabs(keep_index)
+
+    def _close_tabs_to_right(self, index: int):
+        """Close tabs to the right."""
+        self._tab_manager.close_tabs_to_right(index)
+
+    def _duplicate_tab(self, index: int):
+        """Duplicate tab."""
+        self._tab_manager.duplicate_tab(index)
+
+    def _detach_tab(self, index: int, global_pos):
+        """Detach tab to new window."""
+        from commander.__main__ import get_window_manager
+
+        tab_data = self._tab_manager.detach_tab(index)
+        if tab_data:
+            window = get_window_manager().create_window_from_tab(tab_data)
+            window.move(global_pos.x() - 100, global_pos.y() - 50)
+            window.show()
+
+    def _next_tab(self):
+        """Switch to next tab."""
+        self._tab_manager.next_tab()
+
+    def _prev_tab(self):
+        """Switch to previous tab."""
+        self._tab_manager.prev_tab()
+
+    def _switch_to_tab_number(self, number: int):
+        """Switch to tab by number (1-9)."""
+        self._tab_manager.switch_to_tab_number(number)
+
+    def _reopen_closed_tab(self):
+        """Reopen most recently closed tab."""
+        if self._tab_manager.has_closed_tabs():
+            self._tab_manager.reopen_closed_tab()
+        else:
+            self._status_bar.showMessage("No recently closed tabs")
+
+    # === Navigation (delegated to current tab) ===
+
+    def _go_back(self):
+        """Navigate back in current tab."""
+        tab = self._tab_manager.get_current_tab()
+        if tab:
+            tab.go_back()
+            self._update_nav_buttons()
+
+    def _go_forward(self):
+        """Navigate forward in current tab."""
+        tab = self._tab_manager.get_current_tab()
+        if tab:
+            tab.go_forward()
+            self._update_nav_buttons()
+
+    def _go_up(self):
+        """Navigate up in current tab."""
+        tab = self._tab_manager.get_current_tab()
+        if tab:
+            tab.go_up()
+            self._update_nav_buttons()
+
+    def _refresh(self):
+        """Refresh current tab."""
+        tab = self._tab_manager.get_current_tab()
+        if tab:
+            tab.refresh()
+            self._update_status()
+
+    def _update_nav_buttons(self):
+        """Update navigation button states."""
+        tab = self._tab_manager.get_current_tab()
+        if tab:
+            self._back_btn.setEnabled(tab.can_go_back)
+            self._forward_btn.setEnabled(tab.can_go_forward)
+            self._up_btn.setEnabled(tab.can_go_up)
+        else:
+            self._back_btn.setEnabled(False)
+            self._forward_btn.setEnabled(False)
+            self._up_btn.setEnabled(False)
+
+    # === File Operations ===
+
+    def _on_item_activated(self, path: Path):
+        """Handle file activation (non-directory)."""
+        import subprocess
+        from commander.core.archive_handler import ArchiveManager
+
+        # Check for macOS app bundle
+        is_app_bundle = sys.platform == "darwin" and path.suffix.lower() == ".app"
+
+        if path.is_dir() and not is_app_bundle:
+            # This shouldn't happen as TabContentWidget handles directories
+            tab = self._tab_manager.get_current_tab()
+            if tab:
+                tab.navigate_to(path)
+        elif ArchiveManager.is_archive(path):
+            self._open_archive(path)
+        elif self._is_image(path):
+            self._open_image_viewer(path)
+        else:
+            # Open with system default app
+            if sys.platform == "darwin":
+                subprocess.run(["open", str(path)])
+            elif sys.platform == "win32":
+                import os
+
+                os.startfile(str(path))
+            else:
+                subprocess.run(["xdg-open", str(path)])
+
+    def _is_image(self, path: Path) -> bool:
+        """Check if path is an image file."""
+        image_extensions = {
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".gif",
+            ".bmp",
+            ".webp",
+            ".tiff",
+            ".ico",
+            ".psd",
+            ".psb",
+        }
+        return path.suffix.lower() in image_extensions
+
+    def _open_image_viewer(self, path: Path):
+        """Open fullscreen image viewer."""
+        from commander.views.viewer import FullscreenImageViewer
+
+        tab = self._tab_manager.get_current_tab()
+        if not tab:
+            return
+
+        current_path = tab.current_path
+        images = [p for p in current_path.iterdir() if p.is_file() and self._is_image(p)]
+        images.sort()
+
+        self._viewer = FullscreenImageViewer(self)
+        self._viewer.show_image(path, images)
+
+    def _open_archive(self, path: Path):
+        """Open archive browser."""
+        from commander.views.archive_browser import ArchiveBrowser
+        from commander.core.archive_handler import ArchiveManager
+        from PySide6.QtWidgets import QMessageBox
+
+        tab = self._tab_manager.get_current_tab()
+
+        threshold_mb = self._settings.load_archive_size_threshold()
+        if threshold_mb > 0:
+            try:
+                file_size_mb = path.stat().st_size / (1024 * 1024)
+                if file_size_mb >= threshold_mb:
+                    if file_size_mb >= 1024:
+                        size_str = f"{file_size_mb / 1024:.1f} GB"
+                    else:
+                        size_str = f"{file_size_mb:.1f} MB"
+
+                    msg = QMessageBox(self)
+                    msg.setWindowTitle(tr("archive_large_title"))
+                    msg.setText(tr("archive_large_message").replace("{size}", size_str))
+                    msg.setIcon(QMessageBox.Question)
+
+                    extract_btn = msg.addButton(tr("archive_extract"), QMessageBox.AcceptRole)
+                    browse_btn = msg.addButton(tr("archive_browse"), QMessageBox.RejectRole)
+                    msg.addButton(tr("cancel"), QMessageBox.RejectRole)
+
+                    msg.exec()
+
+                    if msg.clickedButton() == extract_btn:
+                        extract_dir = ArchiveManager.smart_extract(path, path.parent)
+                        if tab:
+                            tab.navigate_to(extract_dir)
+                        return
+                    elif msg.clickedButton() == browse_btn:
+                        pass
+                    else:
+                        return
+            except OSError:
+                pass
+
+        self._archive_browser = ArchiveBrowser(path, self)
+        self._archive_browser.show()
+
+    def _on_files_dropped(self, paths: list[Path], destination: Path):
+        """Handle files dropped onto folder tree."""
+        from PySide6.QtWidgets import QMessageBox
+        from commander.widgets.progress_dialog import ProgressDialog
+
+        paths_to_copy = [p for p in paths if p.parent != destination]
+        if not paths_to_copy:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            tr("drop_files"),
+            tr("drop_copy_or_move").format(count=len(paths_to_copy)),
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No
+            | QMessageBox.StandardButton.Cancel,
+        )
+
+        if reply == QMessageBox.StandardButton.Cancel:
+            return
+
+        if reply == QMessageBox.StandardButton.Yes:
+            dialog = ProgressDialog("copy", paths_to_copy, destination, self)
+            dialog.exec()
+        else:
+            dialog = ProgressDialog("move", paths_to_copy, destination, self)
+            dialog.exec()
+
+        self._refresh()
+
+    def _get_focused_paths(self) -> list[Path]:
+        """Get selected paths from the focused panel."""
+        tab = self._tab_manager.get_current_tab()
+        if not tab:
+            return []
+
+        if tab.folder_tree.hasFocus():
+            path = tab.folder_tree.get_selected_path()
+            return [path] if path else []
+        return tab.get_selected_paths()
+
+    def _copy_selected(self):
+        """Copy selected items to clipboard."""
+        paths = self._get_focused_paths()
+        if paths:
+            self._file_ops.copy_to_clipboard(paths)
+            self._status_bar.showMessage(f"Copied {len(paths)} item(s)")
+
+    def _cut_selected(self):
+        """Cut selected items to clipboard."""
+        paths = self._get_focused_paths()
+        if paths:
+            self._file_ops.cut_to_clipboard(paths)
+            self._status_bar.showMessage(f"Cut {len(paths)} item(s)")
+
+    def _paste(self):
+        """Paste items from clipboard."""
+        from commander.widgets.progress_dialog import ProgressDialog
+
+        tab = self._tab_manager.get_current_tab()
+        if not tab:
+            return
+
+        if not self._file_ops.has_clipboard():
+            self._status_bar.showMessage("Nothing to paste")
+            return
+
+        dialog = ProgressDialog("paste", [], tab.current_path, self)
+        result = dialog.exec()
+
+        if result:
+            count = dialog.get_result()
+            self._refresh()
+            if count > 0:
+                self._status_bar.showMessage(f"Pasted {count} item(s)")
+            else:
+                self._status_bar.showMessage("Paste cancelled")
+
+    def _delete_selected(self):
+        """Delete selected items."""
+        tab = self._tab_manager.get_current_tab()
+        if not tab:
+            return
+
+        paths = tab.get_selected_paths()
+        if paths:
+            count = self._file_ops.delete(paths)
+            self._refresh()
+            self._status_bar.showMessage(f"Deleted {count} item(s)")
+
+    def _rename_selected(self):
+        """Rename selected item."""
+        tab = self._tab_manager.get_current_tab()
+        if tab:
+            tab.file_list.start_rename()
+
+    def _undo(self):
+        """Undo last file operation."""
+        get_undo_manager().undo()
+
+    def _redo(self):
+        """Redo last undone operation."""
+        get_undo_manager().redo()
+
+    def _create_new_folder(self):
+        """Create a new folder."""
+        tab = self._tab_manager.get_current_tab()
+        if not tab:
+            return
+
+        name, ok = QInputDialog.getText(self, "New Folder", "Folder name:")
+        if ok and name:
+            result = self._file_ops.create_folder(tab.current_path, name)
+            if result:
+                self._refresh()
+                self._status_bar.showMessage(f"Created folder: {name}")
+            else:
+                self._status_bar.showMessage(f"Error creating folder: {name}")
+
+    # === Menu and Toolbar ===
+
+    def _setup_toolbar(self):
+        """Setup navigation toolbar."""
+        toolbar = QToolBar("Navigation")
+        toolbar.setMovable(False)
+        self.addToolBar(toolbar)
+
+        self._back_btn = QPushButton("<")
+        self._back_btn.setFixedWidth(30)
+        self._back_btn.clicked.connect(self._go_back)
+        toolbar.addWidget(self._back_btn)
+
+        self._forward_btn = QPushButton(">")
+        self._forward_btn.setFixedWidth(30)
+        self._forward_btn.clicked.connect(self._go_forward)
+        toolbar.addWidget(self._forward_btn)
+
+        self._up_btn = QPushButton("^")
+        self._up_btn.setFixedWidth(30)
+        self._up_btn.clicked.connect(self._go_up)
+        toolbar.addWidget(self._up_btn)
+
+        self._refresh_btn = QPushButton("R")
+        self._refresh_btn.setFixedWidth(30)
+        self._refresh_btn.clicked.connect(self._refresh)
+        toolbar.addWidget(self._refresh_btn)
 
     def _setup_menu(self):
         """Setup menu bar."""
@@ -135,6 +596,27 @@ class MainWindow(QMainWindow):
 
         # File menu
         file_menu = menubar.addMenu(tr("menu_file"))
+
+        new_tab_action = QAction(tr("new_tab") if tr("new_tab") != "new_tab" else "New Tab", self)
+        new_tab_action.setShortcut(QKeySequence("Ctrl+T"))
+        new_tab_action.triggered.connect(self._create_new_tab)
+        file_menu.addAction(new_tab_action)
+
+        close_tab_action = QAction(
+            tr("close_tab") if tr("close_tab") != "close_tab" else "Close Tab", self
+        )
+        close_tab_action.setShortcut(QKeySequence("Ctrl+W"))
+        close_tab_action.triggered.connect(lambda: self._close_tab())
+        file_menu.addAction(close_tab_action)
+
+        reopen_tab_action = QAction(
+            tr("reopen_tab") if tr("reopen_tab") != "reopen_tab" else "Reopen Closed Tab", self
+        )
+        reopen_tab_action.setShortcut(QKeySequence("Ctrl+Shift+T"))
+        reopen_tab_action.triggered.connect(self._reopen_closed_tab)
+        file_menu.addAction(reopen_tab_action)
+
+        file_menu.addSeparator()
 
         new_window_action = QAction(tr("new_window"), self)
         new_window_action.setShortcut(QKeySequence("Ctrl+N"))
@@ -158,7 +640,6 @@ class MainWindow(QMainWindow):
         # Edit menu
         edit_menu = menubar.addMenu(tr("menu_edit"))
 
-        # Undo/Redo
         self._undo_action = QAction(tr("undo"), self)
         self._undo_action.setShortcut(QKeySequence.StandardKey.Undo)
         self._undo_action.triggered.connect(self._undo)
@@ -204,29 +685,25 @@ class MainWindow(QMainWindow):
         view_menu = menubar.addMenu(tr("menu_view"))
 
         self._list_view_action = QAction(tr("view_list"), self)
-        self._list_view_action.triggered.connect(lambda: self._file_list.set_view_mode("list"))
+        self._list_view_action.triggered.connect(lambda: self._set_view_mode("list"))
         view_menu.addAction(self._list_view_action)
 
         self._icon_view_action = QAction(tr("view_icons"), self)
-        self._icon_view_action.triggered.connect(lambda: self._file_list.set_view_mode("icons"))
+        self._icon_view_action.triggered.connect(lambda: self._set_view_mode("icons"))
         view_menu.addAction(self._icon_view_action)
 
         self._thumb_view_action = QAction(tr("view_thumbnails"), self)
-        self._thumb_view_action.triggered.connect(
-            lambda: self._file_list.set_view_mode("thumbnails")
-        )
+        self._thumb_view_action.triggered.connect(lambda: self._set_view_mode("thumbnails"))
         view_menu.addAction(self._thumb_view_action)
 
-        # Settings action (goes to app menu on macOS automatically)
+        # Settings action
         settings_action = QAction(tr("settings") + "...", self)
         settings_action.setShortcut(QKeySequence.StandardKey.Preferences)
         settings_action.setMenuRole(QAction.MenuRole.PreferencesRole)
         settings_action.triggered.connect(self._show_settings)
-        # Add to Edit menu for cross-platform consistency
         edit_menu.addSeparator()
         edit_menu.addAction(settings_action)
 
-        # Custom commands action
         custom_commands_action = QAction(tr("custom_commands"), self)
         custom_commands_action.triggered.connect(self._show_custom_commands)
         edit_menu.addAction(custom_commands_action)
@@ -249,6 +726,91 @@ class MainWindow(QMainWindow):
         about_action.setMenuRole(QAction.MenuRole.AboutRole)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
+
+    def _set_view_mode(self, mode: str):
+        """Set view mode for current tab."""
+        tab = self._tab_manager.get_current_tab()
+        if tab:
+            tab.set_view_mode(mode)
+
+    def _setup_shortcuts(self):
+        """Setup keyboard shortcuts."""
+        # Focus address bar
+        focus_address_shortcut = QShortcut(QKeySequence("Ctrl+L"), self)
+        focus_address_shortcut.activated.connect(self._focus_address_bar)
+
+        # Search
+        search_shortcut = QShortcut(QKeySequence("F3"), self)
+        search_shortcut.activated.connect(self._show_search_dialog)
+
+        # Refresh
+        refresh_shortcut = QShortcut(QKeySequence("F5"), self)
+        refresh_shortcut.activated.connect(self._refresh)
+
+        # Go up
+        backspace_shortcut = QShortcut(QKeySequence("Backspace"), self)
+        backspace_shortcut.activated.connect(self._go_up)
+
+        # Back/Forward
+        if sys.platform == "darwin":
+            back_shortcut = QShortcut(QKeySequence("Ctrl+Left"), self)
+            forward_shortcut = QShortcut(QKeySequence("Ctrl+Right"), self)
+        else:
+            back_shortcut = QShortcut(QKeySequence("Alt+Left"), self)
+            forward_shortcut = QShortcut(QKeySequence("Alt+Right"), self)
+        back_shortcut.activated.connect(self._go_back)
+        forward_shortcut.activated.connect(self._go_forward)
+
+        # Up/Down navigation
+        up_shortcut = QShortcut(QKeySequence("Ctrl+Up"), self)
+        down_shortcut = QShortcut(QKeySequence("Ctrl+Down"), self)
+        up_shortcut.activated.connect(self._go_up)
+        down_shortcut.activated.connect(self._open_selected)
+
+        # Tab navigation
+        next_tab_shortcut = QShortcut(QKeySequence("Ctrl+Tab"), self)
+        next_tab_shortcut.activated.connect(self._next_tab)
+
+        prev_tab_shortcut = QShortcut(QKeySequence("Ctrl+Shift+Tab"), self)
+        prev_tab_shortcut.activated.connect(self._prev_tab)
+
+        # Tab number shortcuts (Ctrl+1 through Ctrl+9)
+        for i in range(1, 10):
+            shortcut = QShortcut(QKeySequence(f"Ctrl+{i}"), self)
+            shortcut.activated.connect(lambda n=i: self._switch_to_tab_number(n))
+
+    def _focus_address_bar(self):
+        """Focus and select address bar text."""
+        tab = self._tab_manager.get_current_tab()
+        if tab:
+            tab.address_bar.focus_and_select()
+
+    def _open_selected(self):
+        """Open selected item."""
+        tab = self._tab_manager.get_current_tab()
+        if tab:
+            paths = tab.get_selected_paths()
+            if paths:
+                self._on_item_activated(paths[0])
+
+    def _show_search_dialog(self):
+        """Show search dialog."""
+        from commander.widgets.search_dialog import SearchDialog
+
+        tab = self._tab_manager.get_current_tab()
+        if not tab:
+            return
+
+        dialog = SearchDialog(tab.current_path, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            result = dialog.get_selected_path()
+            if result:
+                if result.is_dir():
+                    tab.navigate_to(result)
+                else:
+                    tab.navigate_to(result.parent)
+
+    # === Dialogs ===
 
     def _show_settings(self):
         """Show settings dialog."""
@@ -283,135 +845,7 @@ class MainWindow(QMainWindow):
             f"<p>{tr('about_version')}: 1.0.0</p>",
         )
 
-    def _setup_toolbar(self):
-        """Setup navigation toolbar."""
-        toolbar = QToolBar("Navigation")
-        toolbar.setMovable(False)
-        self.addToolBar(toolbar)
-
-        self._back_btn = QPushButton("<")
-        self._back_btn.setFixedWidth(30)
-        self._back_btn.clicked.connect(self._go_back)
-        toolbar.addWidget(self._back_btn)
-
-        self._forward_btn = QPushButton(">")
-        self._forward_btn.setFixedWidth(30)
-        self._forward_btn.clicked.connect(self._go_forward)
-        toolbar.addWidget(self._forward_btn)
-
-        self._up_btn = QPushButton("^")
-        self._up_btn.setFixedWidth(30)
-        self._up_btn.clicked.connect(self._go_up)
-        toolbar.addWidget(self._up_btn)
-
-        self._refresh_btn = QPushButton("R")
-        self._refresh_btn.setFixedWidth(30)
-        self._refresh_btn.clicked.connect(self._refresh)
-        toolbar.addWidget(self._refresh_btn)
-
-    def _setup_shortcuts(self):
-        """Setup keyboard shortcuts."""
-        # Ctrl+L / Cmd+L: Focus address bar
-        focus_address_shortcut = QShortcut(QKeySequence("Ctrl+L"), self)
-        focus_address_shortcut.activated.connect(self._focus_address_bar)
-
-        # F3: Search files
-        search_shortcut = QShortcut(QKeySequence("F3"), self)
-        search_shortcut.activated.connect(self._show_search_dialog)
-
-        # F5: Refresh
-        refresh_shortcut = QShortcut(QKeySequence("F5"), self)
-        refresh_shortcut.activated.connect(self._refresh)
-
-        # Backspace: Go up
-        backspace_shortcut = QShortcut(QKeySequence("Backspace"), self)
-        backspace_shortcut.activated.connect(self._go_up)
-
-        # Back: Cmd+Left (macOS) / Alt+Left (others)
-        if sys.platform == "darwin":
-            back_shortcut = QShortcut(QKeySequence("Ctrl+Left"), self)  # Cmd = Ctrl in Qt
-        else:
-            back_shortcut = QShortcut(QKeySequence("Alt+Left"), self)
-        back_shortcut.activated.connect(self._go_back)
-
-        # Forward: Cmd+Right (macOS) / Alt+Right (others)
-        if sys.platform == "darwin":
-            forward_shortcut = QShortcut(QKeySequence("Ctrl+Right"), self)
-        else:
-            forward_shortcut = QShortcut(QKeySequence("Alt+Right"), self)
-        forward_shortcut.activated.connect(self._go_forward)
-
-        # Cmd+Up (macOS) / Ctrl+Up: Go to parent folder
-        # Note: On macOS, Qt maps Cmd key to Ctrl (not Meta)
-        up_shortcut = QShortcut(QKeySequence("Ctrl+Up"), self)
-        down_shortcut = QShortcut(QKeySequence("Ctrl+Down"), self)
-        up_shortcut.activated.connect(self._go_up)
-
-        # Cmd+Down (macOS) / Ctrl+Down: Open selected item
-        down_shortcut.activated.connect(self._open_selected)
-
-    def _open_selected(self):
-        """Open selected item (folder or file)."""
-        paths = self._file_list.get_selected_paths()
-        if paths:
-            self._on_item_activated(paths[0])
-
-    def _focus_address_bar(self):
-        """Focus and select address bar text."""
-        self._address_bar.focus_and_select()
-
-    def _show_search_dialog(self):
-        """Show search dialog."""
-        from commander.widgets.search_dialog import SearchDialog
-
-        dialog = SearchDialog(self._current_path, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            result = dialog.get_selected_path()
-            if result:
-                if result.is_dir():
-                    self._navigate_to(result)
-                else:
-                    self._navigate_to(result.parent)
-                    # TODO: Select the file in list
-
-    def _connect_signals(self):
-        """Connect signals between components."""
-        # Folder tree selection -> file list update
-        self._folder_tree.folder_selected.connect(self._on_folder_selected)
-
-        # Folder tree drag and drop
-        self._folder_tree.files_dropped.connect(self._on_files_dropped)
-
-        # Folder tree request new window
-        self._folder_tree.request_new_window.connect(self._open_new_window_at)
-
-        # Favorites panel selection
-        self._favorites_panel.folder_selected.connect(self._navigate_to)
-
-        # File list double click -> navigate or open
-        self._file_list.item_activated.connect(self._on_item_activated)
-
-        # File list selection -> preview update
-        self._file_list.item_selected.connect(self._on_item_selected)
-
-        # File list request new window
-        self._file_list.request_new_window.connect(self._open_new_window_at)
-
-        # Address bar navigation
-        self._address_bar.path_changed.connect(self._navigate_to)
-
-        # Address bar favorite toggle -> refresh favorites panel
-        self._address_bar.favorite_toggled.connect(self._on_favorite_toggled)
-
-        # Undo manager signals
-        undo_mgr = get_undo_manager()
-        undo_mgr.undo_available.connect(self._on_undo_available)
-        undo_mgr.redo_available.connect(self._on_redo_available)
-        undo_mgr.action_performed.connect(self._on_undo_action_performed)
-
-    def _on_favorite_toggled(self, path: Path, is_favorite: bool):
-        """Handle favorite toggle."""
-        self._favorites_panel.refresh()
+    # === Undo/Redo ===
 
     def _on_undo_available(self, available: bool):
         """Update undo action state."""
@@ -436,316 +870,60 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage(message)
         self._refresh()
 
-    def _load_settings(self):
-        """Load saved settings."""
-        _logger.debug("_load_settings started")
-        # Window geometry
-        geometry = self._settings.load_window_geometry()
-        if geometry:
-            self.restoreGeometry(geometry)
-            _logger.debug("Window geometry restored")
-        else:
-            self.resize(1200, 800)
-            _logger.debug("Using default window size 1200x800")
+    # === Window Operations ===
 
-        # Splitter sizes
-        sizes = self._settings.load_splitter_sizes()
-        if sizes:
-            self._splitter.setSizes(sizes)
-            _logger.debug(f"Splitter sizes restored: {sizes}")
+    def _open_new_window(self):
+        """Open a new window at current path."""
+        tab = self._tab_manager.get_current_tab()
+        path = tab.current_path if tab else Path.home()
+        self._open_new_window_at(path)
 
-        # Last path - navigate to it (this also updates _current_path)
-        last_path = self._settings.load_last_path()
-        _logger.debug(f"Last path from settings: {last_path}")
-        if last_path and last_path.exists():
-            self._navigate_to(last_path)
+    def _open_new_window_at(self, path: Path):
+        """Open a new window at specified path."""
+        from commander.__main__ import get_window_manager
 
-        # View mode
-        view_mode = self._settings.load_view_mode()
-        self._file_list.set_view_mode(view_mode)
-        _logger.debug(f"View mode set to: {view_mode}")
-        _logger.debug("_load_settings completed")
+        window = get_window_manager().create_window(path)
+        window.show()
 
-    def _save_settings(self):
-        """Save current settings."""
-        self._settings.save_window_geometry(self.saveGeometry())
-        self._settings.save_splitter_sizes(self._splitter.sizes())
-        self._settings.save_last_path(self._current_path)
-
-    def closeEvent(self, event):
-        """Save settings on close."""
-        self._save_settings()
-        super().closeEvent(event)
-
-    def _navigate_to(self, path: Path):
-        """Navigate to a directory."""
-        _logger.debug(f"_navigate_to: {path}")
-        if not path.exists() or not path.is_dir():
-            _logger.warning(f"Path does not exist or is not a directory: {path}")
-            return
-
-        # Update file system watcher
-        if self._watcher.directories():
-            self._watcher.removePaths(self._watcher.directories())
-        self._watcher.addPath(str(path))
-
-        self._current_path = path
-        self._address_bar.set_path(path)
-        self._file_list.set_root_path(path)
-        self._folder_tree.select_path(path)
-
-        # Update history
-        if self._history_index < len(self._history) - 1:
-            self._history = self._history[: self._history_index + 1]
-        if not self._history or self._history[-1] != path:
-            self._history.append(path)
-            self._history_index = len(self._history) - 1
-
-        self._update_nav_buttons()
-        self._update_status()
-        _logger.debug(f"Navigation to {path} completed")
-
-    def _on_folder_selected(self, path: Path):
-        """Handle folder tree selection."""
-        self._navigate_to(path)
-
-    def _on_item_activated(self, path: Path):
-        """Handle file list item double-click."""
-        import subprocess
-        from commander.core.archive_handler import ArchiveManager
-
-        # Check for macOS app bundle (.app is a directory but should be launched)
-        is_app_bundle = sys.platform == "darwin" and path.suffix.lower() == ".app"
-
-        if path.is_dir() and not is_app_bundle:
-            self._navigate_to(path)
-        elif ArchiveManager.is_archive(path):
-            self._open_archive(path)
-        elif self._is_image(path):
-            self._open_image_viewer(path)
-        else:
-            # Open with system default app
-            if sys.platform == "darwin":
-                subprocess.run(["open", str(path)])
-            elif sys.platform == "win32":
-                import os
-
-                os.startfile(str(path))
-            else:
-                subprocess.run(["xdg-open", str(path)])
-
-    def _on_item_selected(self, path: Path):
-        """Handle file list item selection."""
-        self._preview_panel.show_preview(path)
-
-    def _is_image(self, path: Path) -> bool:
-        """Check if path is an image file."""
-        image_extensions = {
-            ".jpg",
-            ".jpeg",
-            ".png",
-            ".gif",
-            ".bmp",
-            ".webp",
-            ".tiff",
-            ".ico",
-            ".psd",
-            ".psb",
-        }
-        return path.suffix.lower() in image_extensions
-
-    def _open_image_viewer(self, path: Path):
-        """Open fullscreen image viewer."""
-        from commander.views.viewer import FullscreenImageViewer
-
-        # Get list of images in current directory
-        images = [p for p in self._current_path.iterdir() if p.is_file() and self._is_image(p)]
-        images.sort()
-
-        self._viewer = FullscreenImageViewer(self)
-        self._viewer.show_image(path, images)
-
-    def _open_archive(self, path: Path):
-        """Open archive browser, with optional extract prompt for large files."""
-        from commander.views.archive_browser import ArchiveBrowser
-        from commander.core.archive_handler import ArchiveManager
-        from PySide6.QtWidgets import QMessageBox
-
-        # Check archive size threshold
-        threshold_mb = self._settings.load_archive_size_threshold()
-        if threshold_mb > 0:
-            try:
-                file_size_mb = path.stat().st_size / (1024 * 1024)
-                if file_size_mb >= threshold_mb:
-                    # Format size for display
-                    if file_size_mb >= 1024:
-                        size_str = f"{file_size_mb / 1024:.1f} GB"
-                    else:
-                        size_str = f"{file_size_mb:.1f} MB"
-
-                    # Show dialog
-                    msg = QMessageBox(self)
-                    msg.setWindowTitle(tr("archive_large_title"))
-                    msg.setText(tr("archive_large_message").replace("{size}", size_str))
-                    msg.setIcon(QMessageBox.Question)
-
-                    extract_btn = msg.addButton(tr("archive_extract"), QMessageBox.AcceptRole)
-                    browse_btn = msg.addButton(tr("archive_browse"), QMessageBox.RejectRole)
-                    msg.addButton(tr("cancel"), QMessageBox.RejectRole)
-
-                    msg.exec()
-
-                    if msg.clickedButton() == extract_btn:
-                        # Smart extract to same directory
-                        extract_dir = ArchiveManager.smart_extract(path, path.parent)
-                        self._navigate_to(extract_dir)
-                        return
-                    elif msg.clickedButton() == browse_btn:
-                        pass  # Continue to open archive browser
-                    else:
-                        return  # Cancel
-            except OSError:
-                pass  # If we can't get file size, just open normally
-
-        self._archive_browser = ArchiveBrowser(path, self)
-        self._archive_browser.show()
-
-    def _go_back(self):
-        """Navigate back in history."""
-        if self._history_index > 0:
-            self._history_index -= 1
-            path = self._history[self._history_index]
-            self._current_path = path
-            self._address_bar.set_path(path)
-            self._file_list.set_root_path(path)
-            self._folder_tree.select_path(path)
-            self._update_nav_buttons()
-
-    def _go_forward(self):
-        """Navigate forward in history."""
-        if self._history_index < len(self._history) - 1:
-            self._history_index += 1
-            path = self._history[self._history_index]
-            self._current_path = path
-            self._address_bar.set_path(path)
-            self._file_list.set_root_path(path)
-            self._folder_tree.select_path(path)
-            self._update_nav_buttons()
-
-    def _go_up(self):
-        """Navigate to parent directory."""
-        # First, check if file list has search text to clear
-        if self._file_list.handle_backspace():
-            return
-
-        parent = self._current_path.parent
-        if parent != self._current_path:
-            self._navigate_to(parent)
-
-    def _refresh(self):
-        """Refresh current view."""
-        self._file_list.set_root_path(self._current_path)
-        self._update_status()
-
-    def _on_directory_changed(self, path: str):
-        """Handle external directory changes."""
-        # Check if it's the current directory
-        if Path(path) == self._current_path:
-            self._refresh()
-
-    def _update_nav_buttons(self):
-        """Update navigation button states."""
-        self._back_btn.setEnabled(self._history_index > 0)
-        self._forward_btn.setEnabled(self._history_index < len(self._history) - 1)
-        self._up_btn.setEnabled(self._current_path.parent != self._current_path)
+    # === Status and Title ===
 
     def _update_status(self):
         """Update status bar."""
+        tab = self._tab_manager.get_current_tab()
+        if not tab:
+            self._status_bar.showMessage("No tabs open")
+            return
+
         try:
-            items = list(self._current_path.iterdir())
+            items = list(tab.current_path.iterdir())
             dirs = sum(1 for p in items if p.is_dir())
             files = len(items) - dirs
             self._status_bar.showMessage(f"{dirs} folders, {files} files")
         except PermissionError:
             self._status_bar.showMessage("Access denied")
 
-    def _get_focused_paths(self) -> list[Path]:
-        """Get selected paths from the focused panel."""
-        # Check if folder tree has focus
-        if self._folder_tree.hasFocus():
-            path = self._folder_tree.get_selected_path()
-            return [path] if path else []
-        # Default to file list
-        return self._file_list.get_selected_paths()
+    def _update_window_title(self):
+        """Update window title with version and current tab info."""
+        from commander import __version__, get_build_date
 
-    def _copy_selected(self):
-        """Copy selected items to clipboard."""
-        paths = self._get_focused_paths()
-        if paths:
-            self._file_ops.copy_to_clipboard(paths)
-            self._status_bar.showMessage(f"Copied {len(paths)} item(s)")
+        title = tr("app_name")
+        if __version__:
+            title += f" v{__version__}"
+        build_date = get_build_date()
+        if build_date:
+            title += f" ({build_date})"
 
-    def _cut_selected(self):
-        """Cut selected items to clipboard."""
-        paths = self._get_focused_paths()
-        if paths:
-            self._file_ops.cut_to_clipboard(paths)
-            self._status_bar.showMessage(f"Cut {len(paths)} item(s)")
+        # Add current tab path
+        tab = self._tab_manager.get_current_tab()
+        if tab:
+            title += f" - {tab.current_path}"
 
-    def _paste(self):
-        """Paste items from clipboard."""
-        from commander.widgets.progress_dialog import ProgressDialog
+        self.setWindowTitle(title)
 
-        if not self._file_ops.has_clipboard():
-            self._status_bar.showMessage("Nothing to paste")
-            return
-
-        # Use progress dialog for paste operation
-        dialog = ProgressDialog("paste", [], self._current_path, self)
-        result = dialog.exec()
-
-        if result:
-            count = dialog.get_result()
-            self._refresh()
-            if count > 0:
-                self._status_bar.showMessage(f"Pasted {count} item(s)")
-            else:
-                self._status_bar.showMessage("Paste cancelled")
-
-    def _delete_selected(self):
-        """Delete selected items."""
-        paths = self._file_list.get_selected_paths()
-        if paths:
-            count = self._file_ops.delete(paths)
-            self._refresh()
-            self._status_bar.showMessage(f"Deleted {count} item(s)")
-
-    def _rename_selected(self):
-        """Rename selected item."""
-        self._file_list.start_rename()
-
-    def _undo(self):
-        """Undo last file operation."""
-        get_undo_manager().undo()
-
-    def _redo(self):
-        """Redo last undone operation."""
-        get_undo_manager().redo()
-
-    def _create_new_folder(self):
-        """Create a new folder."""
-
-        name, ok = QInputDialog.getText(self, "New Folder", "Folder name:")
-        if ok and name:
-            result = self._file_ops.create_folder(self._current_path, name)
-            if result:
-                self._refresh()
-                self._status_bar.showMessage(f"Created folder: {name}")
-            else:
-                self._status_bar.showMessage(f"Error creating folder: {name}")
+    # === Updates ===
 
     def _check_for_updates(self):
-        """Check for updates in background (silent)."""
+        """Check for updates in background."""
         try:
             self._update_thread = check_for_updates_async(self._on_update_check_complete)
             _logger.debug("Update check thread started")
@@ -753,16 +931,16 @@ class MainWindow(QMainWindow):
             _logger.error(f"Failed to start update check: {e}", exc_info=True)
 
     def _manual_check_for_updates(self):
-        """Manually check for updates (shows result even if up to date)."""
+        """Manually check for updates."""
         self._update_thread = check_for_updates_async(self._on_manual_update_check_complete)
 
     def _on_update_check_complete(self, release_info: "ReleaseInfo | None"):
-        """Handle automatic update check result (silent if no update)."""
+        """Handle automatic update check result."""
         if release_info:
             self._show_update_notification(release_info)
 
     def _on_manual_update_check_complete(self, release_info: "ReleaseInfo | None"):
-        """Handle manual update check result (always shows message)."""
+        """Handle manual update check result."""
         if release_info:
             self._show_update_notification(release_info)
         else:
@@ -793,57 +971,89 @@ class MainWindow(QMainWindow):
         if msg.clickedButton() == download_btn:
             webbrowser.open(release_info.html_url)
 
-    def _update_window_title(self):
-        """Update window title with version info."""
-        from commander import __version__, get_build_date
+    # === Settings Persistence ===
 
-        title = tr("app_name")
-        if __version__:
-            title += f" v{__version__}"
-        build_date = get_build_date()
-        if build_date:
-            title += f" ({build_date})"
-        self.setWindowTitle(title)
+    def _load_settings(self):
+        """Load saved settings."""
+        _logger.debug("_load_settings started")
 
-    def _open_new_window(self):
-        """Open a new window at current path."""
-        self._open_new_window_at(self._current_path)
-
-    def _open_new_window_at(self, path: Path):
-        """Open a new window at specified path."""
-        from commander.__main__ import get_window_manager
-
-        window = get_window_manager().create_window(path)
-        window.show()
-
-    def _on_files_dropped(self, paths: list[Path], destination: Path):
-        """Handle files dropped onto folder tree."""
-        from PySide6.QtWidgets import QMessageBox
-        from commander.widgets.progress_dialog import ProgressDialog
-
-        # Filter out files already in destination
-        paths_to_copy = [p for p in paths if p.parent != destination]
-        if not paths_to_copy:
-            return
-
-        # Ask user: Copy or Move?
-        reply = QMessageBox.question(
-            self,
-            tr("drop_files"),
-            tr("drop_copy_or_move").format(count=len(paths_to_copy)),
-            QMessageBox.StandardButton.Yes
-            | QMessageBox.StandardButton.No
-            | QMessageBox.StandardButton.Cancel,
-        )
-
-        if reply == QMessageBox.StandardButton.Cancel:
-            return
-
-        if reply == QMessageBox.StandardButton.Yes:
-            dialog = ProgressDialog("copy", paths_to_copy, destination, self)
-            dialog.exec()
+        # Window geometry
+        geometry = self._settings.load_window_geometry()
+        if geometry:
+            self.restoreGeometry(geometry)
+            _logger.debug("Window geometry restored")
         else:
-            dialog = ProgressDialog("move", paths_to_copy, destination, self)
-            dialog.exec()
+            self.resize(1200, 800)
+            _logger.debug("Using default window size 1200x800")
 
-        self._refresh()
+        # View mode for initial tab
+        view_mode = self._settings.load_view_mode()
+        tab = self._tab_manager.get_current_tab()
+        if tab:
+            tab.set_view_mode(view_mode)
+            _logger.debug(f"View mode set to: {view_mode}")
+
+        _logger.debug("_load_settings completed")
+
+    def _save_settings(self):
+        """Save current settings."""
+        self._settings.save_window_geometry(self.saveGeometry())
+
+    def closeEvent(self, event):
+        """Save settings and cleanup on close."""
+        self._save_settings()
+
+        # Cleanup all tabs
+        for tab in self._tab_manager.get_all_tabs():
+            tab.cleanup()
+
+        super().closeEvent(event)
+
+    # === Serialization for Session ===
+
+    def serialize_window(self) -> dict:
+        """Serialize window state for session persistence."""
+        import base64
+
+        return {
+            "geometry": base64.b64encode(self.saveGeometry().data()).decode(),
+            "tabs": self._tab_manager.serialize_all(),
+            "active_tab": self._tab_manager.get_active_tab_index(),
+        }
+
+    def restore_from_session(self, data: dict):
+        """Restore window state from session data."""
+        from PySide6.QtWidgets import QFileIconProvider
+        import base64
+
+        # Restore geometry
+        geometry_b64 = data.get("geometry")
+        if geometry_b64:
+            geometry_bytes = base64.b64decode(geometry_b64)
+            self.restoreGeometry(geometry_bytes)
+
+        # Close default tab (both from manager and tab bar)
+        while self._tab_manager.count() > 0:
+            self._tab_manager.close_tab(0)
+        while self._tab_bar.count() > 0:
+            self._tab_bar.removeTab(0)
+
+        # Restore tabs
+        tabs_data = data.get("tabs", [])
+        icon_provider = QFileIconProvider()
+        folder_icon = icon_provider.icon(QFileIconProvider.IconType.Folder)
+
+        for tab_data in tabs_data:
+            index = self._tab_manager.merge_tab(tab_data)
+            # Manually add to tab bar since signal might not work during restore
+            tab = self._tab_manager.get_tab(index)
+            if tab and self._tab_bar.count() <= index:
+                self._tab_bar.addTab(folder_icon, tab.get_tab_title())
+                self._tab_bar.setTabToolTip(index, tab.get_tab_tooltip())
+                self._connect_tab_content_signals(tab)
+
+        # Restore active tab
+        active_tab = data.get("active_tab", 0)
+        if 0 <= active_tab < self._tab_manager.count():
+            self._tab_manager.switch_to_tab(active_tab)
+            self._tab_bar.setCurrentIndex(active_tab)

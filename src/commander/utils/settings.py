@@ -275,3 +275,133 @@ class Settings:
     def load_viewer_grid_visible(self) -> bool:
         """Load viewer grid visibility. Default False."""
         return self._settings.value("viewer/grid_visible", False, type=bool)
+
+    # Network connections
+    def save_network_connections(self, connections: list[dict]) -> None:
+        """Save network connections list.
+
+        Args:
+            connections: List of connection config dictionaries.
+        """
+        self._settings.setValue("network/connections", connections)
+
+    def load_network_connections(self) -> list[dict]:
+        """Load network connections list.
+
+        Returns:
+            List of connection config dictionaries.
+        """
+        connections = self._settings.value("network/connections")
+        if connections is None:
+            return []
+        return connections
+
+    def add_network_connection(self, config: dict) -> str:
+        """Add a network connection.
+
+        Args:
+            config: Connection configuration dictionary with keys:
+                   protocol, host, port, share, username, display_name, etc.
+
+        Returns:
+            Generated connection ID.
+        """
+        import uuid
+
+        connections = self.load_network_connections()
+
+        # Generate unique connection ID
+        conn_id = f"conn_{uuid.uuid4().hex[:8]}"
+        config["connection_id"] = conn_id
+
+        connections.append(config)
+        self.save_network_connections(connections)
+
+        return conn_id
+
+    def update_network_connection(self, connection_id: str, config: dict) -> bool:
+        """Update an existing network connection.
+
+        Args:
+            connection_id: ID of the connection to update.
+            config: New configuration dictionary.
+
+        Returns:
+            True if updated successfully, False if not found.
+        """
+        connections = self.load_network_connections()
+
+        for i, conn in enumerate(connections):
+            if conn.get("connection_id") == connection_id:
+                config["connection_id"] = connection_id
+                connections[i] = config
+                self.save_network_connections(connections)
+                return True
+
+        return False
+
+    def remove_network_connection(self, connection_id: str) -> bool:
+        """Remove a network connection.
+
+        Args:
+            connection_id: ID of the connection to remove.
+
+        Returns:
+            True if removed successfully, False if not found.
+        """
+        connections = self.load_network_connections()
+        original_len = len(connections)
+
+        connections = [c for c in connections if c.get("connection_id") != connection_id]
+
+        if len(connections) < original_len:
+            self.save_network_connections(connections)
+            return True
+
+        return False
+
+    def get_network_connection(self, connection_id: str) -> dict | None:
+        """Get a specific network connection by ID.
+
+        Args:
+            connection_id: ID of the connection to get.
+
+        Returns:
+            Connection config dictionary, or None if not found.
+        """
+        connections = self.load_network_connections()
+
+        for conn in connections:
+            if conn.get("connection_id") == connection_id:
+                return conn
+
+        return None
+
+    # Session management (tabs and windows)
+    def save_session(self, windows: list[dict]):
+        """Save complete session state (all windows and tabs)."""
+        import json
+        self._settings.setValue("session/windows", json.dumps(windows))
+
+    def load_session(self) -> list[dict]:
+        """Load session state.
+
+        Returns:
+            List of window data dictionaries, or empty list if no session.
+        """
+        import json
+        data = self._settings.value("session/windows")
+        if data:
+            try:
+                return json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                return []
+        return []
+
+    def save_restore_session_enabled(self, enabled: bool):
+        """Save whether to restore session on startup."""
+        self._settings.setValue("session/restore_enabled", enabled)
+
+    def load_restore_session_enabled(self) -> bool:
+        """Load restore session preference. Default True."""
+        return self._settings.value("session/restore_enabled", True, type=bool)

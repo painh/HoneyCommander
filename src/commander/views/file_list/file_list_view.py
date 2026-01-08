@@ -287,6 +287,10 @@ class FileListView(QWidget):
             pass
         list_selection_model.selectionChanged.connect(self._on_selection_changed)
 
+    def get_view_mode(self) -> str:
+        """Get current view mode."""
+        return self._view_mode.value
+
     def set_view_mode(self, mode: str) -> None:
         """Change view mode (list, icons, thumbnails)."""
         self._view_mode = ViewMode(mode)
