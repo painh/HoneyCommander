@@ -1061,3 +1061,18 @@ class FileListView(QWidget):
         self._search_text = ""
         self._search_label.hide()
         self._search_timer.stop()
+
+    def handle_backspace(self) -> bool:
+        """Handle backspace key for search. Returns True if handled."""
+        if self._search_text:
+            self._search_text = self._search_text[:-1]
+            if self._search_text:
+                self._do_fuzzy_search()
+            else:
+                self._clear_search()
+            return True
+        return False
+
+    def has_search_text(self) -> bool:
+        """Check if there is active search text."""
+        return bool(self._search_text)

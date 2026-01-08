@@ -201,5 +201,12 @@
   "archive_browse": "Browse Inside",
 
   "extract_all": "Extract All",
-  "extracting": "Extracting..."
+  "extracting": "Extracting...",
+
+  "save": "Save",
+  "open_with_external_app": "Open with External App",
+  "file_too_large": "File is too large to preview",
+  "size": "Size",
+  "max_size": "Max preview size",
+  "no_preview_available": "No preview available"
 }

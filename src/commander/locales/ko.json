@@ -201,5 +201,12 @@
   "archive_browse": "내부 탐색",
 
   "extract_all": "모두 압축 풀기",
-  "extracting": "압축 푸는 중..."
+  "extracting": "압축 푸는 중...",
+
+  "save": "저장",
+  "open_with_external_app": "외부 앱으로 열기",
+  "file_too_large": "미리보기하기에 파일이 너무 큽니다",
+  "size": "크기",
+  "max_size": "최대 미리보기 크기",
+  "no_preview_available": "미리보기 불가"
 }

@@ -634,6 +634,10 @@ class MainWindow(QMainWindow):
 
     def _go_up(self):
         """Navigate to parent directory."""
+        # First, check if file list has search text to clear
+        if self._file_list.handle_backspace():
+            return
+
         parent = self._current_path.parent
         if parent != self._current_path:
             self._navigate_to(parent)

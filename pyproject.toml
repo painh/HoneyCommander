@@ -12,6 +12,7 @@ dependencies = [
     "send2trash>=1.8.3",
     "pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'",
     "py7zr>=1.1.0",
+    "pygments>=2.19.2",
 ]
 
 [project.scripts]
