@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-from PySide6.QtCore import Qt, QSize, QFileSystemWatcher
+from PySide6.QtCore import Qt, QSize, QFileSystemWatcher, QUrl
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -16,10 +16,16 @@ from PySide6.QtWidgets import (
     QComboBox,
     QStackedWidget,
     QPushButton,
+    QSlider,
+    QCheckBox,
 )
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from commander.core.image_loader import load_pixmap, ALL_IMAGE_FORMATS
+from commander.core.model3d_loader import SUPPORTED_3D_FORMATS
 from commander.widgets.text_viewer import TextViewer
+# from commander.widgets.model3d_viewer import Model3DViewer  # Disabled - causes UI freeze
 from commander.utils.i18n import tr
 
 
@@ -27,6 +33,9 @@ class PreviewPanel(QWidget):
     """Right panel for file preview."""
 
     SUPPORTED_IMAGES = ALL_IMAGE_FORMATS
+    SUPPORTED_VIDEO = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".wmv", ".m4v", ".flv"}
+    SUPPORTED_AUDIO = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".wma", ".opus"}
+    SUPPORTED_3D = SUPPORTED_3D_FORMATS  # glTF, GLB, OBJ, FBX
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -36,6 +45,10 @@ class PreviewPanel(QWidget):
         # File watcher for auto-refresh
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(self._on_file_changed)
+
+        # Media player
+        self._media_player: QMediaPlayer | None = None
+        self._audio_output: QAudioOutput | None = None
 
         self._setup_ui()
 
@@ -124,6 +137,80 @@ class PreviewPanel(QWidget):
         self._placeholder_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._stack.addWidget(self._placeholder_widget)
 
+        # === Media (video/audio) widget ===
+        self._media_widget = QWidget()
+        media_layout = QVBoxLayout(self._media_widget)
+        media_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Video display widget
+        self._video_widget = QVideoWidget()
+        self._video_widget.setMinimumHeight(100)
+        media_layout.addWidget(self._video_widget, stretch=1)
+
+        # Audio-only placeholder (shown when playing audio)
+        self._audio_placeholder = QLabel()
+        self._audio_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._audio_placeholder.setStyleSheet("font-size: 48px;")
+        self._audio_placeholder.setText("🎵")
+        self._audio_placeholder.hide()
+        media_layout.addWidget(self._audio_placeholder, stretch=1)
+
+        # Media controls
+        controls_widget = QWidget()
+        controls_layout = QVBoxLayout(controls_widget)
+        controls_layout.setContentsMargins(5, 5, 5, 5)
+        controls_layout.setSpacing(5)
+
+        # Time slider
+        self._time_slider = QSlider(Qt.Orientation.Horizontal)
+        self._time_slider.setRange(0, 0)
+        self._time_slider.sliderMoved.connect(self._seek_media)
+        self._time_slider.sliderPressed.connect(self._slider_pressed)
+        self._time_slider.sliderReleased.connect(self._slider_released)
+        controls_layout.addWidget(self._time_slider)
+
+        # Buttons row
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(5)
+
+        self._play_button = QPushButton("▶")
+        self._play_button.setFixedWidth(40)
+        self._play_button.clicked.connect(self._toggle_play)
+        buttons_layout.addWidget(self._play_button)
+
+        self._time_label = QLabel("00:00 / 00:00")
+        self._time_label.setStyleSheet("font-size: 11px;")
+        buttons_layout.addWidget(self._time_label)
+
+        buttons_layout.addStretch()
+
+        # Volume slider
+        self._volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self._volume_slider.setRange(0, 100)
+        self._volume_slider.setValue(70)
+        self._volume_slider.setFixedWidth(80)
+        self._volume_slider.valueChanged.connect(self._set_volume)
+        buttons_layout.addWidget(QLabel("🔊"))
+        buttons_layout.addWidget(self._volume_slider)
+
+        # Loop checkbox
+        self._loop_checkbox = QCheckBox(tr("loop") if tr("loop") != "loop" else "Loop")
+        self._loop_checkbox.setChecked(False)
+        buttons_layout.addWidget(self._loop_checkbox)
+
+        controls_layout.addLayout(buttons_layout)
+        media_layout.addWidget(controls_widget)
+
+        self._stack.addWidget(self._media_widget)
+
+        # === 3D model preview widget ===
+        # Disabled due to PyVista/VTK causing UI freeze
+        # self._model3d_widget = Model3DViewer()
+        # self._stack.addWidget(self._model3d_widget)
+
+        # Slider dragging state
+        self._slider_dragging = False
+
         # File info
         self._info_label = QLabel()
         self._info_label.setWordWrap(True)
@@ -143,6 +230,7 @@ class PreviewPanel(QWidget):
     def _show_placeholder(self):
         """Show placeholder when nothing is selected."""
         self._filter_widget.hide()
+        self._stop_media()
         self._placeholder_widget.setText(tr("select_file_to_preview"))
         self._stack.setCurrentWidget(self._placeholder_widget)
         self._info_label.clear()
@@ -166,12 +254,38 @@ class PreviewPanel(QWidget):
         # Show file info
         self._show_file_info(path)
 
+        # Stop any playing media first
+        self._stop_media()
+
         # Determine preview type
-        if path.is_file() and path.suffix.lower() in self.SUPPORTED_IMAGES:
+        suffix = path.suffix.lower()
+
+        if path.is_file() and suffix in self.SUPPORTED_IMAGES:
             # Image preview
             self._filter_widget.show()
             self._show_image_preview(path)
             self._stack.setCurrentWidget(self._image_widget)
+
+        elif path.is_file() and suffix in self.SUPPORTED_VIDEO:
+            # Video preview
+            self._filter_widget.hide()
+            self._show_media_preview(path, is_video=True)
+            self._stack.setCurrentWidget(self._media_widget)
+
+        elif path.is_file() and suffix in self.SUPPORTED_AUDIO:
+            # Audio preview
+            self._filter_widget.hide()
+            self._show_media_preview(path, is_video=False)
+            self._stack.setCurrentWidget(self._media_widget)
+
+        elif path.is_file() and suffix in self.SUPPORTED_3D:
+            # 3D model preview - disabled due to PyVista/VTK blocking issues
+            self._filter_widget.hide()
+            self._placeholder_widget.setText(
+                f"3D Preview: {path.name}\n\n"
+                "(3D preview temporarily disabled)"
+            )
+            self._stack.setCurrentWidget(self._placeholder_widget)
 
         elif path.is_file() and TextViewer.is_text_file(path):
             # Text file
@@ -289,3 +403,120 @@ class PreviewPanel(QWidget):
             os.startfile(str(self._current_path))
         else:
             subprocess.run(["xdg-open", str(self._current_path)])
+
+    # === Media player methods ===
+
+    def _init_media_player(self):
+        """Initialize media player if not already done."""
+        if self._media_player is None:
+            self._media_player = QMediaPlayer()
+            self._audio_output = QAudioOutput()
+            self._media_player.setAudioOutput(self._audio_output)
+            self._media_player.setVideoOutput(self._video_widget)
+
+            # Connect signals
+            self._media_player.positionChanged.connect(self._on_position_changed)
+            self._media_player.durationChanged.connect(self._on_duration_changed)
+            self._media_player.playbackStateChanged.connect(self._on_playback_state_changed)
+            self._media_player.mediaStatusChanged.connect(self._on_media_status_changed)
+
+            # Set initial volume
+            self._audio_output.setVolume(self._volume_slider.value() / 100)
+
+    def _show_media_preview(self, path: Path, is_video: bool):
+        """Show media (video/audio) preview."""
+        self._init_media_player()
+
+        # Show/hide video widget based on media type
+        if is_video:
+            self._video_widget.show()
+            self._audio_placeholder.hide()
+        else:
+            self._video_widget.hide()
+            self._audio_placeholder.show()
+
+        # Load media (don't auto-play - user clicks play button)
+        self._media_player.setSource(QUrl.fromLocalFile(str(path)))
+        self._play_button.setText("▶")
+
+    def _stop_media(self):
+        """Stop media playback."""
+        if self._media_player is not None:
+            self._media_player.stop()
+            self._media_player.setSource(QUrl())
+            self._play_button.setText("▶")
+            self._time_slider.setValue(0)
+            self._time_label.setText("00:00 / 00:00")
+
+    def _toggle_play(self):
+        """Toggle play/pause."""
+        if self._media_player is None:
+            return
+
+        if self._media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self._media_player.pause()
+        else:
+            self._media_player.play()
+
+    def _seek_media(self, position: int):
+        """Seek to position."""
+        if self._media_player is not None:
+            self._media_player.setPosition(position)
+
+    def _slider_pressed(self):
+        """Handle slider press - pause updates."""
+        self._slider_dragging = True
+
+    def _slider_released(self):
+        """Handle slider release - seek and resume updates."""
+        self._slider_dragging = False
+        if self._media_player is not None:
+            self._media_player.setPosition(self._time_slider.value())
+
+    def _set_volume(self, value: int):
+        """Set volume."""
+        if self._audio_output is not None:
+            self._audio_output.setVolume(value / 100)
+
+    def _on_position_changed(self, position: int):
+        """Handle position change."""
+        if not self._slider_dragging:
+            self._time_slider.setValue(position)
+        self._update_time_label(
+            position, self._media_player.duration() if self._media_player else 0
+        )
+
+    def _on_duration_changed(self, duration: int):
+        """Handle duration change."""
+        self._time_slider.setRange(0, duration)
+        self._update_time_label(0, duration)
+
+    def _on_playback_state_changed(self, state: QMediaPlayer.PlaybackState):
+        """Handle playback state change."""
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self._play_button.setText("⏸")
+        else:
+            self._play_button.setText("▶")
+
+    def _on_media_status_changed(self, status: QMediaPlayer.MediaStatus):
+        """Handle media status change - for loop functionality."""
+        if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            if self._loop_checkbox.isChecked():
+                self._media_player.setPosition(0)
+                self._media_player.play()
+
+    def _update_time_label(self, position: int, duration: int):
+        """Update time label."""
+        pos_str = self._format_time(position)
+        dur_str = self._format_time(duration)
+        self._time_label.setText(f"{pos_str} / {dur_str}")
+
+    def _format_time(self, ms: int) -> str:
+        """Format milliseconds to MM:SS or HH:MM:SS."""
+        seconds = ms // 1000
+        minutes = seconds // 60
+        hours = minutes // 60
+
+        if hours > 0:
+            return f"{hours}:{minutes % 60:02d}:{seconds % 60:02d}"
+        return f"{minutes:02d}:{seconds % 60:02d}"

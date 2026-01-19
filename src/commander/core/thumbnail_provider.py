@@ -35,9 +35,16 @@ class ThumbnailWorker(QThread):
 
 
 class ThumbnailProvider(QObject):
-    """Provides thumbnails with in-memory caching."""
+    """Provides thumbnails with in-memory caching.
+
+    Features:
+    - LRU cache with configurable size
+    - Concurrent loading limit to prevent resource exhaustion
+    - Only loads visible items (when used with delegate)
+    """
 
     SUPPORTED_FORMATS = ALL_IMAGE_FORMATS
+    MAX_CONCURRENT_LOADS = 6  # Limit concurrent thumbnail loading
 
     thumbnail_ready = Signal(str)  # path_str - emitted when thumbnail is ready
 
@@ -46,6 +53,7 @@ class ThumbnailProvider(QObject):
         self._settings = Settings()
         self._cache: dict[str, QPixmap] = {}
         self._pending: dict[str, ThumbnailWorker] = {}
+        self._queue: list[Path] = []  # Paths waiting to be loaded
         self._max_cache_size = self._settings.load_thumbnail_cache_size()
         size = self._settings.load_thumbnail_size()
         self._thumbnail_size = QSize(size, size)
@@ -77,15 +85,37 @@ class ThumbnailProvider(QObject):
         return None
 
     def _load_thumbnail(self, path: Path):
-        """Start loading thumbnail in background."""
+        """Queue thumbnail for loading."""
         path_str = str(path)
 
-        worker = ThumbnailWorker(path, self._thumbnail_size)
-        worker.thumbnail_ready.connect(self._on_thumbnail_ready)
-        worker.finished.connect(lambda: self._on_worker_finished(path_str))
+        # Add to queue if not already there
+        if path not in self._queue and path_str not in self._pending:
+            self._queue.append(path)
 
-        self._pending[path_str] = worker
-        worker.start()
+        # Process queue
+        self._process_queue()
+
+    def _process_queue(self):
+        """Process queued thumbnails up to concurrent limit."""
+        while self._queue and len(self._pending) < self.MAX_CONCURRENT_LOADS:
+            path = self._queue.pop(0)
+            path_str = str(path)
+
+            # Skip if already in cache (loaded while queued)
+            if path_str in self._cache:
+                continue
+
+            # Skip if already loading
+            if path_str in self._pending:
+                continue
+
+            # Start loading
+            worker = ThumbnailWorker(path, self._thumbnail_size)
+            worker.thumbnail_ready.connect(self._on_thumbnail_ready)
+            worker.finished.connect(lambda p=path_str: self._on_worker_finished(p))
+
+            self._pending[path_str] = worker
+            worker.start()
 
     def _on_thumbnail_ready(self, path_str: str, pixmap: QPixmap):
         """Handle thumbnail ready."""
@@ -100,10 +130,13 @@ class ThumbnailProvider(QObject):
         self.thumbnail_ready.emit(path_str)
 
     def _on_worker_finished(self, path_str: str):
-        """Clean up finished worker."""
+        """Clean up finished worker and process queue."""
         if path_str in self._pending:
             worker = self._pending.pop(path_str)
             worker.deleteLater()
+
+        # Process more from queue
+        self._process_queue()
 
     def clear_cache(self):
         """Clear thumbnail cache."""
